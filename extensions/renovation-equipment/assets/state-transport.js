@@ -1,4 +1,5 @@
 import { PLANNER_STATE_VERSION } from "./socket-plan.js";
+import { CONTROL_RELATIONS_VERSION } from "./circuit-preview.js";
 
 export function isPortableMode() {
     return Boolean(globalThis.__RENOVATION_OFFLINE_STORE__);
@@ -23,6 +24,7 @@ export async function readPlannerState() {
 }
 
 export async function writePlannerState(payload) {
+    payload = { ...payload, controlRelationsVersion: CONTROL_RELATIONS_VERSION };
     if (isPortableMode()) {
         return globalThis.__RENOVATION_OFFLINE_STORE__.update(payload);
     }

@@ -1,4 +1,6 @@
-import { markerPosition, renderOverviewPlan, roomGeometry } from "./floorplan.js";
+import {
+    markerPosition, renderOverviewPlan, renderPreviewConnections, roomGeometry,
+} from "./floorplan.js";
 import { HOUSE_ZONE_BY_ID } from "./house-geometry.js";
 import { diagramPointSymbol, OUTLET_POINT_WARNINGS } from "./outlet-diagram.js";
 import { isDedicatedCircuit, isSocket, isWeakCurrent } from "./socket-plan.js";
@@ -6,6 +8,9 @@ import { isQuotedEquipment } from "./budget.js";
 import { trackLengthCm } from "./track-lighting.js";
 import { renderObjectIcon } from "./plan-icons.js";
 import { isConditionalFloorDryer, laundryMarkerNote } from "./laundry-notes.js";
+import {
+    CONTROL_RELATIONS_CAUTION, isControlTarget, previewControlledLights,
+} from "./circuit-preview.js";
 
 const escape = (value) => String(value ?? "").replace(/[&<>"']/g,
     (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
@@ -168,7 +173,49 @@ function renderLaundryContext(data) {
     }).join("");
 }
 
-export function renderElectricalSheet(state, view) {
+function renderControlEditor(data, selectedId) {
+    const selected = data.activeSwitches.find((item) => item.id === selectedId);
+    const assigned = data.activeSwitches.filter((item) =>
+        item.controlledLightIds?.length).length;
+    const roomName = (item) => data.rooms.find((room) =>
+        room.id === item.roomId)?.name || "房間未定";
+    return `<section class="control-editor" aria-label="編輯開關燈具對應">
+        <h3>開關面板 → 燈具對應</h3>
+        <p data-control-summary>已指定 ${assigned}／${data.activeSwitches.length} 個有效面板；
+            尚未設定對應 ${data.activeSwitches.length - assigned}。
+            ${CONTROL_RELATIONS_CAUTION}。</p>
+        <form id="control-relations-form">
+            <label for="control-switch">選擇整個開關面板（含雙開關，不區分左右鍵）</label>
+            <select id="control-switch" name="switchId" data-control-switch>
+                <option value="">請選面板，不自動建立對應</option>
+                ${data.activeSwitches.map((item) =>
+                    `<option value="${escape(item.id)}"
+                        ${selected?.id === item.id ? "selected" : ""}>
+                        ${escape(roomName(item))}｜${escape(item.name)}｜
+                        ${escape(item.brandModel)}｜
+                        ${item.controlledLightIds?.length || 0}個對應
+                    </option>`).join("")}
+            </select>
+            ${selected ? `<fieldset>
+                <legend>指定此面板控制的燈具（可跨房、多選；整條軌道為一個目標）</legend>
+                <p>勾選後按「儲存對應」才套用；取消全部即解除。
+                    停用／刪除燈具或面板前須先解除對應。</p>
+                ${data.placedLights.filter(isControlTarget).map((item) =>
+                    `<label class="control-target">
+                        <input type="checkbox" name="controlledLightIds"
+                            value="${escape(item.id)}"
+                            ${selected.controlledLightIds?.includes(item.id) ?
+                                "checked" : ""}>
+                        <span>${escape(roomName(item))}｜${escape(item.name)}｜
+                            ${escape(lightDescription(item))}</span>
+                    </label>`).join("") ||
+                    "<p>尚無已放置且有有效燈頭的燈具。</p>"}
+            </fieldset><button type="submit">儲存對應</button>` : ""}
+        </form>
+    </section>`;
+}
+
+export function renderElectricalSheet(state, view, selectedSwitchId = null) {
     if (!["outlet-sheet", "lighting-sheet"].includes(view)) {
         throw new RangeError("未知的配置圖檢視。");
     }
@@ -218,7 +265,10 @@ export function renderElectricalSheet(state, view) {
         }
         if (switches.has(item)) {
             return marker(item, geometry, switchLabels.get(item.id),
-                `${roomName}；${description(item)}；有效開關位置，控制對象與配線未核`,
+                `${roomName}；${description(item)}；${item.controlledLightIds?.length
+                    ? `已指定${previewControlledLights(item, data.items).length}個燈具；` +
+                        CONTROL_RELATIONS_CAUTION
+                    : "尚未設定對應，控制對象未核"}`,
                 "switch",
                 '<rect x="-7" y="-7" width="14" height="14"/>' +
                     '<text y="4" text-anchor="middle">S</text>',
@@ -269,7 +319,9 @@ export function renderElectricalSheet(state, view) {
         <div class="sheet-legend" aria-label="圖例與目前數量">${legend}</div>
         <p class="sheet-caution">${outlets
             ? "R／B／C 均依目前存檔，來源衝突不自動移位；C 是弱電／網路，不是電源。專用迴路只是關聯資料，不是額外插座或已核實線路。"
-            : "開關只表示位置，控制對象未核；不畫模擬控制線或實際配線。W 不能推算照度，lm／光束角不足不做照度估算。"}底圖沿用現況牆、窗、門與目前方案；不得據此施工。</p>
+            : `只畫明確儲存的面板對應；未指定的控制對象未核、不畫連線。
+                ${CONTROL_RELATIONS_CAUTION}。W 不能推算照度，
+                lm／光束角不足不做照度估算。`}底圖沿用現況牆、窗、門與目前方案；不得據此施工。</p>
         ${hasLaundry ? `<p class="sheet-caution" data-sheet-laundry-warning>
             非施工：烘衣機門口／${hasGasDryer ? "燃氣" : "供能"}／排氣、
             外推荷重／盆體支撐待核；
@@ -290,12 +342,16 @@ export function renderElectricalSheet(state, view) {
             狀態／位置未定 ${data.unresolvedSwitches.length}。</p>` : ""}
         <p class="muted">可水平捲動查看圖面；聚焦或指向標記可讀規格，
             完整文字清單在圖下方。符號非實機占地；
-            短灰線只連同一標記的文字，不是配線或控制關係。</p>
+            短灰線只連同一標記的文字；紫紅虛線只表示明確儲存的面板對應，
+            均不是實際配管走線。</p>
         <div class="sheet-scroll" tabindex="0" role="region"
             aria-label="${title}可捲動圖面">
             ${renderOverviewPlan(data.rooms, data.items, false, null,
-                layers, null, 80, draw, renderLaundryContext(data))}
+                layers, null, 80, draw, renderLaundryContext(data) +
+                    (outlets ? "" : renderPreviewConnections(
+                        data.rooms, data.items, null, null, true)))}
         </div>
+        ${!outlets ? renderControlEditor(data, selectedSwitchId) : ""}
         <details class="sheet-schedule">
             <summary>${outlets ? "端點" : "燈具與有效開關"}文字清單
                 （${listed.length} 筆）</summary>

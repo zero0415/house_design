@@ -31,7 +31,8 @@ import {
 } from "./socket-plan.js";
 import { planDisplayCategory } from "./plan-visibility.js";
 import {
-    previewCircuitLinks, previewControlledLights, previewTargetRoomId,
+    CONTROL_RELATIONS_CAUTION, itemHasControlRelations, previewCircuitLinks,
+    previewControlledLights, validateControlRelations,
 } from "./circuit-preview.js";
 import {
     estimateRoomIlluminance, ILLUSTRATIVE_LIGHT_RANGE_CM, isPlacedLight,
@@ -95,6 +96,7 @@ const currencySymbols = { TWD: "NT$", JPY: "¥", USD: "US$" };
 
 let state;
 let view = "plan";
+let controlSwitchId = null;
 let showSourceOverlay = false;
 let lightingPreview = false;
 let lightingPlaneCm = LIGHT_PREVIEW_PLANES_CM.desk;
@@ -2219,8 +2221,6 @@ function renderPlanView() {
     const balconyOutdoorSwitch = state.items.find((item) =>
         item.roomId === "balcony" && isOutdoorSwitch(item) &&
         item.switchPlanStatus !== "removed");
-    const studioBalconySwitch = state.items.find((item) =>
-        item.id === "quoted-switch-12" && item.switchPlanStatus !== "removed");
     const sockets = state.items.filter(isSocket);
     const circuits = state.items.filter(isDedicatedCircuit);
     const pointWarnings = state.items.filter((item) =>
@@ -2293,13 +2293,10 @@ function renderPlanView() {
         黃色光圈為<strong>直射照度近似或相對亮度示意，非 lux 熱圖</strong>，
         暗色不代表已測得的低照度；
         已亮 ${allLights.filter((item) => litItemIds.has(item.id)).length} 組。
-        點圖上的「單／雙」開關可切換該房燈具，點燈具可單獨切換；
-        玄關暫對應走廊，${balconyOutdoorSwitch
-            ? "陽台戶外防潮開關暫對應陽台燈；原工作室陽台側開關已移除。"
-            : studioBalconySwitch ? "工作室陽台側暫對應陽台。" :
-                "陽台燈的控制點目前待補。"}
-        <span class="preview-circuit-key"></span>青色虛線表示這次模擬的
-        <strong>暫擬控制對應</strong>；點開關或燈可強調對應線，
+        點圖上的「單／雙」開關只切換已明確儲存的對應燈具，未設定則不切換；
+        請至「燈具配置圖」指定整個面板的對應，點燈具仍可單獨切換。
+        <span class="preview-circuit-key"></span>青色虛線表示
+        <strong>${CONTROL_RELATIONS_CAUTION}</strong>；點開關或燈可強調對應線，
         跨房間的線請在全屋圖查看，<strong>不是已核實的電路或線管路徑</strong>。
         光學資料不足時僅依已知瓦數相對調整光圈；
         瓦數未知則沿用原示意半徑（一般吸頂燈
@@ -2310,16 +2307,17 @@ function renderPlanView() {
         此模式不修改報價或儲存配置。</p>` : "";
     const circuitLinks = lightingPreview ? previewCircuitLinks(state.items) : [];
     const mappedSwitches = lightingPreview ? state.items.filter((item) =>
-        item.switchType && item.placement && item.switchPlanStatus !== "removed" &&
-        (!room || item.roomId === room.id || previewTargetRoomId(item) === room.id)) : [];
+        item.switchType && item.placement && item.switchPlanStatus === "active" &&
+        (!room || item.roomId === room.id || previewControlledLights(
+            item, state.items).some((light) => light.roomId === room.id))) : [];
     const shownLinks = circuitLinks.filter(({ switchItem, lightItem }) =>
         !room || switchItem.roomId === room.id || lightItem.roomId === room.id);
     const mappingPanel = lightingPreview ? `<details class="preview-mapping"
         ${circuitListOpen ? "open" : ""}>
-        <summary>暫擬開關與燈具對應（${mappedSwitches.length} 處開關、
+        <summary>已存開關與燈具對應（${mappedSwitches.length} 處開關、
             ${shownLinks.length} 組控制關係）</summary>
-        <p>依目前模擬分組列示；雙開關尚未區分左右鍵。
-            此表與圖面虛線都<strong>不代表已確認的迴路或施工走線</strong>。
+        <p>只用「燈具配置圖」明確儲存的面板對應；雙開關視為整個面板，
+            不虛構左右鍵。<strong>${CONTROL_RELATIONS_CAUTION}</strong>。
             跨房間關係請在全屋格局圖查看。</p>
         <ul>${mappedSwitches.map((switchItem) => {
             const targets = previewControlledLights(switchItem, state.items);
@@ -2330,7 +2328,7 @@ function renderPlanView() {
                 <span>→ ${targets.length ? targets.map((light) =>
                     `${escapeHtml(light.name)}${light.lightType === "track"
                         ? `（${light.spotlightQuantity} 盞同軌）` : ""}`).join("、")
-                    : "目前沒有可模擬的燈具，控制對象待確認"}</span></li>`;
+                    : "尚未設定對應；請到燈具配置圖指定，此開關不切換任何燈具"}</span></li>`;
         }).join("") || "<li>本空間目前沒有已標位的開關對應。</li>"}</ul>
     </details>` : "";
     const socketLegend = `<p class="door-legend">
@@ -2463,7 +2461,7 @@ function renderPlanView() {
                         浴室開關僅標控制區，實際應避開濕區；
                         ${balconyOutdoorSwitch
                             ? "陽台戶外開關的防護等級、防水接線及實際價差待報。"
-                            : "陽台照明暫由工作室內側控制。"}`
+                            : "陽台照明控制對象以明確儲存的對應為準，未設定即待核。"}`
                     : ""}
                 ${state.items.some(isQuotedDownlight)
                     ? `<span class="downlight-key">燈</span>圓形表示天花崁燈暫定位置；
@@ -2988,7 +2986,7 @@ function render() {
         document.querySelector("#portable-note").hidden = !isPortableMode();
         content.innerHTML = (pendingNewItem && !sheetView && view !== "survey" &&
             view !== "database" ? renderNewItemForm() : "") +
-            (sheetView ? renderElectricalSheet(state, view)
+            (sheetView ? renderElectricalSheet(state, view, controlSwitchId)
             : view === "survey" ? renderSurvey(survey, state.rooms)
             : view === "plan" ? renderPlanView()
                 : view === "room" ? renderRoomView()
@@ -3076,7 +3074,9 @@ function togglePreviewMarker(id) {
         ? isPlacedLight(item) ? [item.id] : []
         : previewControlledLights(item, state.items).map((entry) => entry.id);
     if (!targets.length) {
-        setStatus("這處尚未放置可模擬的燈具；開關與實際迴路仍待電工配置。");
+        setStatus(item.switchType
+            ? "尚未設定對應；請到燈具配置圖指定此面板控制的燈具。目前不切換任何燈具。"
+            : "這處尚未放置可模擬的燈具；規格與實際迴路仍待電工配置。");
         return;
     }
     const allLit = targets.every((target) => litItemIds.has(target));
@@ -3687,12 +3687,16 @@ function itemFieldChanged(target) {
             setStatus("此插座已配專用迴路，請先改綁迴路或使用「移至別房」一起移動。", "error");
             return;
         }
-        if (item.roomId !== target.value && (item.placement || item.orientation !== null) &&
-            !window.confirm(`移動「${item.name}」到其他房間會清除原圖面位置和出風方向，確定嗎？`)) {
+        const hasControls = itemHasControlRelations(item, state.items);
+        if (item.roomId !== target.value &&
+            (item.placement || item.orientation !== null) &&
+            !window.confirm(hasControls
+                ? `移動「${item.name}」到其他房間會保留相對標位及ID對應；新位置須另核，確定嗎？`
+                : `移動「${item.name}」到其他房間會清除原圖面位置和出風方向，確定嗎？`)) {
             target.value = item.roomId;
             return;
         }
-        if (item.roomId !== target.value) {
+        if (item.roomId !== target.value && !hasControls) {
             item.placement = null;
             item.orientation = null;
         }
@@ -4055,6 +4059,12 @@ content.addEventListener("toggle", (event) => {
 }, true);
 
 content.addEventListener("change", (event) => {
+    if (event.target.matches("[data-control-switch]")) {
+        controlSwitchId = event.target.value || null;
+        render();
+        content.querySelector("[data-control-switch]")?.focus();
+        return;
+    }
     if (pendingProduct) {
         const productType = event.target.closest("[data-product-type]");
         if (productType) {
@@ -4260,7 +4270,40 @@ content.addEventListener("change", (event) => {
 });
 
 content.addEventListener("submit", (event) => {
-    if (event.target.matches("#new-equipment-form")) {
+    if (event.target.matches("#control-relations-form")) {
+        event.preventDefault();
+        if (conflicted || invalidInputs.size) {
+            setStatus("請先處理版本衝突或無效欄位，未儲存對應。", "error");
+            return;
+        }
+        const form = new FormData(event.target);
+        const item = state.items.find((entry) => entry.id === form.get("switchId") &&
+            entry.switchType && entry.switchPlanStatus === "active" && entry.placement);
+        if (!item) {
+            setStatus("請選擇有效且已標位的開關面板。", "error");
+            return;
+        }
+        const ids = form.getAll("controlledLightIds");
+        try {
+            validateControlRelations(state.items.map((entry) => entry.id === item.id
+                ? { ...entry, controlledLightIds: ids } : entry));
+        } catch (error) {
+            if (!(error instanceof TypeError || error instanceof RangeError)) throw error;
+            setStatus(error.message, "error");
+            return;
+        }
+        if (JSON.stringify(item.controlledLightIds ?? []) === JSON.stringify(ids)) {
+            setStatus(ids.length
+                ? "對應沒有變更，未新增復原步驟。" :
+                    "尚未設定對應，未修改資料。");
+            return;
+        }
+        item.controlledLightIds = ids;
+        scheduleSave();
+        render();
+        content.querySelector("#control-relations-form button")?.focus();
+        void save();
+    } else if (event.target.matches("#new-equipment-form")) {
         event.preventDefault();
         confirmNewItem(event.target);
     } else if (event.target.matches("#product-form")) {
@@ -4679,6 +4722,10 @@ content.addEventListener("click", (event) => {
         if (action === "rotate-outdoor-ac") rotateOutdoorUnit(itemId);
         if (action === "clear-placement") {
             const item = state.items.find((entry) => entry.id === selectedPlanItemId);
+            if (itemHasControlRelations(item, state.items)) {
+                setStatus("此物件仍有開關燈具對應，請先在燈具配置圖解除對應再清除標位。", "error");
+                return;
+            }
             if (isQuotedOutlet(item)) {
                 setStatus("原報插座仍需標位；要減少數量請按「刪除」，或拖曳改位置。", "error");
                 return;
@@ -5062,6 +5109,10 @@ function confirmRemoveItem(id) {
         setStatus("設備版本已有衝突，請重新載入後再刪除。", "error");
         return;
     }
+    if (itemHasControlRelations(item, state.items)) {
+        setStatus("此物件仍有開關燈具對應，請先在燈具配置圖解除對應再刪除／移除。", "error");
+        return;
+    }
     if (isSocket(item) && state.items.some((entry) =>
         isDedicatedCircuit(entry) && entry.circuitOutletId === id)) {
         setStatus("此插座已配專用迴路，請先將迴路改綁其他插座或刪除迴路。", "error");
@@ -5391,6 +5442,7 @@ async function loadSave(file) {
         pendingMoveOutletId = null;
         pendingProductDeleteId = null;
         selectedPlanItemId = null;
+        controlSwitchId = null;
         planRoomId = null;
         pendingObject = null;
         lightingPreview = false;
@@ -5439,6 +5491,7 @@ reloadButton.addEventListener("click", async () => {
         pendingDeleteId = null;
         pendingMoveOutletId = null;
         reloadButton.hidden = true;
+        controlSwitchId = null;
         render();
         setStatus("已載入最新資料", "saved");
     } catch (error) {

@@ -16,7 +16,10 @@ try {
     }
     const { validateState } = await import(moduleURLs.get("state-browser.mjs"));
     const { PLANNER_STATE_VERSION } = await import(moduleURLs.get("assets/socket-plan.js"));
-    const storageKey = `renovation-equipment-offline-v1:${location.pathname}`;
+    const { guardControlRelationsUpdate } =
+        await import(moduleURLs.get("assets/circuit-preview.js"));
+    const legacyStorageKey = `renovation-equipment-offline-v1:${location.pathname}`;
+    const storageKey = `renovation-equipment-offline-controls-v1:${location.pathname}`;
     const pagesDemo = (location.protocol === "https:" || location.protocol === "http:") &&
         new URL(location.href).searchParams.get("demo") === "pages";
     if (pagesDemo) {
@@ -31,8 +34,12 @@ try {
     let sampleLoadError = null;
     let storedText = null;
     try {
-        storedText = localStorage.getItem(storageKey);
+        const ownSaved = localStorage.getItem(storageKey);
+        storedText = ownSaved ?? localStorage.getItem(legacyStorageKey);
         if (storedText !== null) current = validateState(JSON.parse(storedText));
+        if (ownSaved === null && current) {
+            localStorage.setItem(storageKey, JSON.stringify(current));
+        }
     } catch (error) {
         if (error.name === "SecurityError") unavailableStorage = error;
         else damagedStorage = error;
@@ -69,9 +76,14 @@ try {
             if (sample.revision !== 0 || sample.undo !== null) {
                 throw new Error("公開示例存檔含有編輯紀錄，請檢查範例資料。");
             }
-            const latestSaved = localStorage.getItem(storageKey);
+            const ownSaved = localStorage.getItem(storageKey);
+            const latestSaved = ownSaved ?? localStorage.getItem(legacyStorageKey);
             if (latestSaved !== null) {
                 current = validateState(JSON.parse(latestSaved));
+                if (ownSaved === null) {
+                    localStorage.setItem(storageKey, JSON.stringify(current));
+                }
+                sampleIsTransient = false;
             } else if (!current) {
                 current = sample;
                 sampleIsTransient = true;
@@ -137,6 +149,7 @@ try {
                 error.conflict = true;
                 throw error;
             }
+            guardControlRelationsUpdate(current, candidate);
             const next = validateState({
                 version: PLANNER_STATE_VERSION,
                 revision: revision + 1,

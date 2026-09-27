@@ -2,6 +2,9 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { FURNITURE_TEMPLATES } from "./assets/furniture.js";
+import {
+    guardControlRelationsUpdate, validateControlRelations,
+} from "./assets/circuit-preview.js";
 import { ROOM_DRAWING_DIMENSIONS } from "./assets/house-geometry.js";
 import { DOOR_OPTIONS } from "./assets/door-options.js";
 import { QUOTED_SLIDE_TRACKS, SLIDE_TRACK_RATE_TWD } from "./assets/slide-tracks.js";
@@ -1376,6 +1379,10 @@ export function validateState(data) {
             switchType,
             switchEnvironment,
             switchPlanStatus,
+            ...(Object.hasOwn(item, "controlledLightIds") ? {
+                controlledLightIds: Array.isArray(item.controlledLightIds)
+                    ? [...item.controlledLightIds] : item.controlledLightIds,
+            } : {}),
             outletCircuit,
             ...(outletPlanPointId === null ? {} : { outletPlanPointId }),
             circuitOutletId,
@@ -1403,6 +1410,12 @@ export function validateState(data) {
             quotedQuantity,
         };
     });
+    try {
+        validateControlRelations(items);
+    } catch (error) {
+        if (!(error instanceof TypeError || error instanceof RangeError)) throw error;
+        throw new StoreError(400, error.message);
+    }
     const quotedBathroomIds = [...QUOTED_BATH_EQUIPMENT.keys()]
         .filter((id) => !id.endsWith("-heater-install"));
     if (quotedBathroomIds.some((id) => itemIds.has(id))) {
@@ -1535,6 +1548,12 @@ export function createStore(filePath) {
             }
             if (candidate?.products === undefined && current.products.length > 0) {
                 throw new StoreError(400, "修改設備前請重新載入含物件資料庫的最新版畫布。");
+            }
+            try {
+                guardControlRelationsUpdate(current, candidate);
+            } catch (error) {
+                if (!(error instanceof TypeError)) throw error;
+                throw new StoreError(400, error.message);
             }
             const next = validateState({
                 version: PLANNER_STATE_VERSION,

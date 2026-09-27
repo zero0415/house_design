@@ -12,6 +12,9 @@ import {
 import { upgradeLegacyLightingState } from "./lighting-options.js";
 import { lightDataStatus } from "./lighting-preview.js";
 import {
+    CONTROL_RELATIONS_CAUTION, hasControlRelations,
+} from "./circuit-preview.js";
+import {
     BATHROOM_INSTALLATION_QUOTE, isBathroomInstallationIncluded,
 } from "./bathroom-installation.js";
 
@@ -27,7 +30,7 @@ export function encodeSave(state, exportedAt = new Date().toISOString()) {
     }
     return JSON.stringify({
         format: SAVE_FORMAT,
-        formatVersion: SAVE_FORMAT_VERSION,
+        formatVersion: hasControlRelations(state) ? 6 : SAVE_FORMAT_VERSION,
         exportedAt,
         state: {
             version: PLANNER_STATE_VERSION,
@@ -56,10 +59,15 @@ export function decodeSave(text) {
     const unwrapped = versions.includes(document?.version) &&
         document?.format === undefined;
     if (!unwrapped && (document?.format !== SAVE_FORMAT ||
-        !versions.includes(document?.formatVersion))) {
+        ![...versions, 6].includes(document?.formatVersion))) {
         throw new RangeError("存檔格式或版本不相容；請使用本規劃器匯出的 JSON。");
     }
     const imported = unwrapped ? document : document.state;
+    if (!unwrapped && document.formatVersion === 6 &&
+        (imported?.version !== PLANNER_STATE_VERSION ||
+            !hasControlRelations(imported))) {
+        throw new RangeError("新版開關對應存檔須含 v5 資料及完整對應欄位，未改動目前規劃。");
+    }
     if (!versions.includes(imported?.version) ||
         !Array.isArray(imported.rooms) ||
         !Array.isArray(imported.items) ||
@@ -95,6 +103,7 @@ const CSV_COLUMNS = Object.freeze([
     "光束角（度）", "光學資料來源", "照度資料待補",
     "來源標位 ID", "標位類型（示意，非施工核可）",
     "冷氣規劃狀態", "冷氣施工費（未核）", "單條燈軌長度（cm）",
+    "面板對應燈具ID", "開關對應狀態（非施工）",
 ]);
 
 export function itemListCsv(state) {
@@ -154,6 +163,9 @@ export function itemListCsv(state) {
             isSplitAirConditioner(item) ? item.acPlanStatus ?? "active" : "",
             isSplitAirConditioner(item) ? "待報：人工、支架、冷媒管、排水、許可及電氣；不列入本體暫計" : "",
             item.lightType === "track" ? item.trackLengthCm ?? 150 : "",
+            item.switchType ? (item.controlledLightIds ?? []).join(" | ") : "",
+            item.switchType ? item.controlledLightIds?.length
+                ? CONTROL_RELATIONS_CAUTION : "尚未設定對應" : "",
         ].map(csvCell).join(",");
     });
     return "\ufeff" + [CSV_COLUMNS.map(csvCell).join(","), ...rows].join("\r\n") + "\r\n";

@@ -25,7 +25,9 @@ import {
     isConditionalFloorDryer, isConditionalOutboardSink, laundryMarkerNote,
 } from "./laundry-notes.js";
 import { renderLightingPreview } from "./lighting-preview.js";
-import { previewCircuitLinks } from "./circuit-preview.js";
+import {
+    CONTROL_RELATIONS_CAUTION, previewCircuitLinks,
+} from "./circuit-preview.js";
 import { BEDROOM2_PARTITION_ID, BEDROOM2_PARTITION_OPTIONS } from "./partition-options.js";
 import {
     BALCONY_SINK, CORRIDOR_PATH, EXISTING_CURVED_BAY_PATH,
@@ -980,22 +982,33 @@ function renderOutdoorAC(item, overview, selectedItemId = null, showRotateHandle
     </g>`;
 }
 
-function renderPreviewConnections(rooms, items, focusedCircuitId, roomId = null) {
+export function renderPreviewConnections(rooms, items, focusedCircuitId,
+    roomId = null, sheet = false) {
     const geometryByRoom = new Map(rooms.map((room) => [room.id, roomGeometry(room)]));
     const links = previewCircuitLinks(items).filter(({ switchItem, lightItem }) =>
         geometryByRoom.has(switchItem.roomId) && geometryByRoom.has(lightItem.roomId) &&
         (!roomId || switchItem.roomId === roomId && lightItem.roomId === roomId));
     if (!links.length) return "";
     const position = (item) => markerPosition(item, geometryByRoom.get(item.roomId));
-    return `<g class="preview-circuits ${focusedCircuitId ? "has-focus" : ""}"
-        aria-hidden="true" pointer-events="none">
+    return `<g class="${sheet ? "sheet-control-relations" : "preview-circuits"}
+        ${focusedCircuitId ? "has-focus" : ""}"
+        ${sheet ? `role="group" aria-label="${CONTROL_RELATIONS_CAUTION}"` :
+            'aria-hidden="true" pointer-events="none"'}>
         ${links.map(({ switchItem, lightItem }) => {
             const from = position(switchItem);
             const to = position(lightItem);
-            return `<g class="preview-circuit ${focusedCircuitId === switchItem.id ||
+            return `<g class="${sheet ? "sheet-control-relation" : "preview-circuit"}
+                ${focusedCircuitId === switchItem.id ||
                 focusedCircuitId === lightItem.id ? "is-focused" : ""}"
-                data-preview-switch-id="${escapeSvg(switchItem.id)}"
-                data-preview-light-id="${escapeSvg(lightItem.id)}">
+                ${sheet ? `tabindex="0" role="img"
+                    aria-label="${escapeSvg(switchItem.name)}對應${escapeSvg(
+                        lightItem.name)}；${CONTROL_RELATIONS_CAUTION}"
+                    data-control-switch-id="${escapeSvg(switchItem.id)}"
+                    data-control-light-id="${escapeSvg(lightItem.id)}"` :
+                    `data-preview-switch-id="${escapeSvg(switchItem.id)}"
+                    data-preview-light-id="${escapeSvg(lightItem.id)}"`}>
+                <title>${escapeSvg(switchItem.name)} → ${escapeSvg(
+                    lightItem.name)}；${CONTROL_RELATIONS_CAUTION}</title>
                 <path d="M${from.x} ${from.y} L${to.x} ${to.y}"/>
                 <circle cx="${to.x}" cy="${to.y}" r="3"/>
             </g>`;

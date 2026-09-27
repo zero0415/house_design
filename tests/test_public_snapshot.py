@@ -79,6 +79,15 @@ class PublicSnapshotTests(unittest.TestCase):
                       "沒有複製或轉繪其頁面"):
             with self.subTest(utility=value):
                 self.assertIn(value, readme)
+        for value in ("所有開關面板一開始均未指定任何燈具",
+                      "整個開關面板", "未指定面板", "單步 Undo",
+                      "controlRelationsVersion: 1", "容器版號為 **6**",
+                      "renovation-equipment-offline-controls-v1"):
+            with self.subTest(controls=value):
+                self.assertIn(value, readme)
+        self.assertIn("只切換在燈具配置圖明確儲存", quote)
+        self.assertIn("模擬操作不改存檔或報價", quote)
+        self.assertNotIn("目前照明模擬只沿用房間分組", quote)
         for value in ("原水槽擬拆", "刪線幽靈框", "179 筆",
                       "不會憑空新增掛盆", "右側洗衣機"):
             with self.subTest(balcony_sheet=value):
@@ -101,6 +110,8 @@ class PublicSnapshotTests(unittest.TestCase):
             "bedroom-")}, {"臥室1", "臥室2", "臥室3"})
         self.assertTrue(all(item["roomId"] in rooms and
                             (item["productId"] is None or item["productId"] in products)
+                            for item in state["items"]))
+        self.assertTrue(all("controlledLightIds" not in item
                             for item in state["items"]))
         self.assertTrue({f"sample-product-{index:02d}" for index in range(1, 14)}
                         <= products)
@@ -490,7 +501,8 @@ class PublicSnapshotTests(unittest.TestCase):
         for name in ("kitchen-plan.js", "kitchen-icons.js", "outlet-diagram.js",
                      "bathroom-installation.js", "laundry-notes.js",
                      "quote-provenance.js", "guest-bath-plan.js",
-                     "balcony-plan.js", "electrical-sheets.js"):
+                     "balcony-plan.js", "electrical-sheets.js",
+                     "circuit-preview.js", "file-actions.js"):
             self.assertIn(f"assets/{name}", {entry["path"] for entry in bundle["modules"]})
         for name in ("corridor-plan.js", "air-conditioning-plan.js"):
             self.assertTrue((ROOT / "extensions" / "renovation-equipment" / "assets" /
@@ -513,6 +525,9 @@ class PublicSnapshotTests(unittest.TestCase):
         self.assertIn('new URL("../files/設備規劃.json", location.href)', bootstrap)
         self.assertIn('sampleURL.origin !== location.origin', bootstrap)
         self.assertIn('credentials: "omit", redirect: "error", mode: "same-origin"', bootstrap)
+        self.assertIn('renovation-equipment-offline-controls-v1:', bootstrap)
+        self.assertIn('renovation-equipment-offline-v1:', bootstrap)
+        self.assertIn("guardControlRelationsUpdate(current, candidate)", bootstrap)
         self.assertNotIn("179", bootstrap)
         self.assertNotIn(SAMPLE.read_text(encoding="utf-8")[:100],
                          PORTABLE.read_text(encoding="utf-8"))
