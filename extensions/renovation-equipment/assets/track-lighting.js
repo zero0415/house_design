@@ -6,3 +6,11 @@ export const CORRIDOR_TRACK_INSTALL_PRICE_TWD = 1200;
 export const CORRIDOR_SPOTLIGHT_MODEL = "12W LED 圓盤型軌道燈・黑色・自然光";
 export const CORRIDOR_TRACK_MODEL = "黑色軌道 1.5 米";
 export const CORRIDOR_TRACK_PLACEMENT = Object.freeze({ x: 0.51, y: 0.445 });
+
+export function trackLengthCm(value) {
+    const length = value == null ? CORRIDOR_TRACK_LENGTH_CM : value;
+    if (typeof length !== "number" || !Number.isFinite(length) || length < 1 || length > 3000) {
+        throw new RangeError("單條軌道長度須為 1–3000cm；此為繪圖範圍，不代表商品供應規格。");
+    }
+    return length;
+}

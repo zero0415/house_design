@@ -61,6 +61,13 @@ p { margin: 6px 0 10px; }
     overflow-wrap: anywhere;
 }
 .quote-note { font-size: 12px; }
+.quote-intro {
+    margin: 10px 0 14px; padding: 8px 12px;
+    border: 1px solid var(--border-color-default, #d0d7de);
+    border-radius: 8px;
+}
+.quote-intro summary { cursor: pointer; font-weight: 600; }
+.quote-intro[open] .quote-note { margin-top: 8px; }
 .tabs { display: flex; flex-wrap: wrap; gap: 8px; border-bottom: 1px solid var(--border-color-default, #d0d7de); margin-top: 20px; }
 .tabs button {
     background: transparent;
@@ -268,6 +275,16 @@ p { margin: 6px 0 10px; }
     color: var(--true-color-blue, #0969da);
 }
 .quoted-tag { flex: none; font-size: 11px; color: #7051a1; border: 1px solid #bba9d3; border-radius: 5px; padding: 3px 5px; }
+.quote-provenance { cursor: help; }
+[data-quote-provenance]:focus-visible { outline: 2px solid var(--color-focus-outline, #0969da); outline-offset: 3px; }
+.quote-tooltip {
+    position: fixed; z-index: 1000; max-width: min(420px, calc(100vw - 16px));
+    padding: 10px 12px; border: 1px solid var(--border-color-default, #d0d7de);
+    border-radius: 6px; box-shadow: 0 3px 12px #0003; white-space: pre-line;
+    font-size: 13px; line-height: 1.6;
+    background: var(--background-color-default, #fff); color: var(--text-color-default, #1f2328);
+}
+.quote-source-details { white-space: pre-line; font-size: 13px; line-height: 1.6; }
 .item-amount {
     color: var(--text-color-muted, #57606a);
     font-size: 12px;
@@ -1464,6 +1481,17 @@ p { margin: 6px 0 10px; }
 .diagram-weak .icon-diagram { fill: #177748; }
 .diagram-point .diagram-point-label { fill: #fff; font-weight: 600; stroke: none; }
 .diagram-point .diagram-warning-ring { fill: none; stroke: #bf7800; stroke-width: 1; stroke-dasharray: 2 1; }
+.ac-planning-warning { font-size: 14px; line-height: 1.6; }
+.ac-planning-warning strong { display: block; font-size: 15px; }
+.warning-details {
+    margin: 8px 0; padding: 8px 12px;
+    border: 1px solid var(--border-color-default, #d0d7de); border-radius: 6px;
+}
+.warning-details > summary { cursor: pointer; font-size: 13px; line-height: 1.5; color: var(--true-color-red, #cf222e); }
+.warning-details > summary:focus-visible { outline: 2px solid var(--color-focus-outline, #0969da); outline-offset: 3px; }
+.ac-warning-heading { margin: 12px 0 4px; font-size: 15px; }
+.urgent-cues { margin: 8px 0; padding-left: 22px; color: var(--true-color-red, #cf222e); font-size: 13px; line-height: 1.5; }
+.fixture-overlap { outline: 2px dashed var(--true-color-red, #cf222e); outline-offset: 3px; }
 .outlet-diagram-legend { padding: 10px; border: 1px solid #a7b8c4; }
 .diagram-key { padding: 2px 5px; color: white; border-radius: 3px; white-space: nowrap; }
 .diagram-key.general { background: #b52e32; }

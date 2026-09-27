@@ -1,4 +1,5 @@
 import { isSplitAirConditioner } from "./ac-outdoors.js";
+import { trackLengthCm } from "./track-lighting.js";
 import { FURNITURE_TEMPLATES } from "./furniture.js";
 import { installedDownlightUnitPrice } from "./lighting-options.js";
 import { planDisplayCategory } from "./plan-visibility.js";
@@ -61,7 +62,7 @@ function catalogKey(source, group) {
     }
     return JSON.stringify([group, source.switchType, source.switchEnvironment,
         source.outletCircuit ? "general" : null, source.equipmentType,
-        source.lightType, source.lightSelection, source.trackSelection,
+        source.lightType, source.lightSelection, source.trackSelection, source.trackLengthCm,
         source.spotlightSelection, source.spotlightQuantity, source.brandModel,
         source.unitPrice, source.fixtureUnitPrice, source.installationUnitPrice,
         source.spotlightUnitPrice, source.priceCurrency, source.lightWatts,
@@ -331,16 +332,17 @@ export function customEquipment(draft, id) {
     } else if (type === "track") {
         item.unit = "條";
         item.lightType = "track";
-        item.trackLengthCm = 150;
+        item.trackLengthCm = trackLengthCm(draft.trackLengthCm == null ||
+            String(draft.trackLengthCm).trim() === "" ? undefined : Number(draft.trackLengthCm));
         item.trackSelection = "custom";
-        item.brandModel ||= "軌道 1.5 米（型號待填）";
+        item.brandModel ||= `軌道 ${item.trackLengthCm}cm（型號待填）`;
         item.spotlightSelection = "custom";
         item.spotlightQuantity = 3;
         item.spotlightModel = spotlightModel || "軌道燈（型號待填）";
         item.spotlightUnitPrice = optionalPrice(draft.spotlightPrice, "每盞軌道燈單價");
         item.spotlightPriceSource = "自行新增軌道燈；型號、價格與相容性待核";
         item.installationUnitPrice = optionalPrice(draft.installationPrice, "軌道安裝單價");
-        item.note = `${item.note} 新增 150cm 軌道及 3 盞燈，另計安裝；` +
+        item.note = `${item.note} 新增 ${item.trackLengthCm}cm 軌道及 3 盞燈，另計安裝；` +
             "軌道接頭、天花固定、實際長度及配線待核。";
     } else {
         const quantity = Number(draft.quantity || 1);

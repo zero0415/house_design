@@ -666,7 +666,7 @@ function validateProducts(data, legacyLighting = false) {
         if (!ID.test(id) || ids.has(id) || !Object.hasOwn(PRODUCT_TYPES, type) ||
             !Object.hasOwn(PRODUCT_ENVIRONMENTS, environment) ||
             environment === "any" && type !== "equipment" ||
-            environment === "balcony" && ["recessed", "track"].includes(type)) {
+            environment === "balcony" && ["recessed", "track", "split-ac", "window-ac"].includes(type)) {
             throw new StoreError(400, "物件資料庫的商品識別碼、類型或使用環境無效。");
         }
         ids.add(id);
@@ -691,11 +691,11 @@ function validateProducts(data, legacyLighting = false) {
         if (!installation && entry.installationUnitPrice != null) {
             throw new StoreError(400, "這種商品不能另列燈具安裝單價。");
         }
-        if (type !== "equipment" && (entry.widthCm != null ||
+        if (!["equipment", "split-ac"].includes(type) && (entry.widthCm != null ||
             entry.depthCm != null)) {
             throw new StoreError(400, "開關、插座與燈具的位置圖示不可冒充機身寬深。");
         }
-        if (type !== "track" && (entry.spotlightModel != null ||
+        if (type !== "track" && (entry.trackLengthCm != null || entry.spotlightModel != null ||
             entry.spotlightQuantity != null || entry.spotlightUnitPrice != null)) {
             throw new StoreError(400, "只有軌道燈組可設定軌道燈具明細。");
         }
@@ -721,6 +721,18 @@ function validateProducts(data, legacyLighting = false) {
             entry.lightLumens, "每盞光通量（流明）", 1, 200000) : null;
         const beamAngleDeg = installation ? optionalLightNumber(
             entry.beamAngleDeg, "光束角度", 1, 180) : null;
+        const split = type === "split-ac";
+        if (!split && ["heightCm", "outdoorWidthCm", "outdoorDepthCm", "outdoorHeightCm"]
+            .some((key) => entry[key] != null)) {
+            throw new StoreError(400, "只有分離式商品可設定室內外機成套尺寸。");
+        }
+        const outdoorWidthCm = split ? optionalLightNumber(entry.outdoorWidthCm,
+            "室外機寬度", OUTDOOR_AC_SIZE_BOUNDS_CM.minWidth, OUTDOOR_AC_SIZE_BOUNDS_CM.maxWidth) : null;
+        const outdoorDepthCm = split ? optionalLightNumber(entry.outdoorDepthCm,
+            "室外機深度", OUTDOOR_AC_SIZE_BOUNDS_CM.minDepth, OUTDOOR_AC_SIZE_BOUNDS_CM.maxDepth) : null;
+        if (split && (outdoorWidthCm === null || outdoorDepthCm === null)) {
+            throw new StoreError(400, "分離式商品須提供室外機寬深，不得捏造可放置的機位。");
+        }
         return {
             id, type, environment, name, brandModel, unit,
             unitPrice: optionalNumber(entry.unitPrice ?? null, "商品參考單價"),
@@ -729,11 +741,18 @@ function validateProducts(data, legacyLighting = false) {
             priceCurrency: itemCurrency,
             priceSource: optionalText(entry.priceSource ?? "", "商品價格來源", 450),
             note: optionalText(entry.note ?? "", "商品備註", 800),
-            widthCm: type === "equipment"
+            widthCm: type === "equipment" || split
                 ? optionalDimension(entry.widthCm, "商品寬度") : null,
-            depthCm: type === "equipment"
+            depthCm: type === "equipment" || split
                 ? optionalDimension(entry.depthCm, "商品深度") : null,
             spotlightModel,
+            ...(split ? {
+                heightCm: optionalDimension(entry.heightCm, "室內機高度"),
+                outdoorWidthCm, outdoorDepthCm,
+                outdoorHeightCm: optionalDimension(entry.outdoorHeightCm, "室外機高度"),
+            } : {}),
+            ...(type === "track" ? { trackLengthCm:
+                optionalLightNumber(entry.trackLengthCm ?? 150, "軌道長度（cm）", 1, 3000) } : {}),
             spotlightQuantity,
             spotlightUnitPrice: type === "track"
                 ? optionalNumber(entry.spotlightUnitPrice ?? null, "軌道燈單價") : null,
@@ -1190,11 +1209,12 @@ export function validateState(data) {
             !trackLighting && (roomId === "balcony" || roomId === "ac-platform") ||
             lightType !== "track" || itemCurrency !== "TWD" ||
             item.quantity !== 1 || item.unit !== "條" ||
-            item.trackLengthCm !== CORRIDOR_TRACK_LENGTH_CM ||
+            !Number.isFinite(item.trackLengthCm ?? 150) ||
+            (item.trackLengthCm ?? 150) < 1 || (item.trackLengthCm ?? 150) > 3000 ||
             !Number.isSafeInteger(item.spotlightQuantity) ||
             item.spotlightQuantity < 0 || item.spotlightQuantity > 12 ||
             item.widthCm != null || item.depthCm != null || item.heightCm != null)) {
-            throw new StoreError(400, "走廊軌道燈組須為 1 條 150cm 軌道，軌道燈數量須為 0 至 12 盞。");
+            throw new StoreError(400, "軌道燈組須為 1 條 1–3000cm 軌道，軌道燈數量須為 0 至 12 盞；長度範圍非商品供應保證。");
         }
         if (!quotedDownlight && !ceilingLight && !trackLighting && !genericLight &&
             item.lightType != null) {
@@ -1297,7 +1317,8 @@ export function validateState(data) {
         }
         if (trackSelection !== null && trackSelection !== "custom" &&
             (item.brandModel !== TRACK_RAIL_OPTIONS[trackSelection].model ||
-                selectedUnitPrice !== TRACK_RAIL_OPTIONS[trackSelection].unitPrice)) {
+                selectedUnitPrice !== TRACK_RAIL_OPTIONS[trackSelection].unitPrice ||
+                (item.trackLengthCm ?? 150) !== TRACK_RAIL_OPTIONS[trackSelection].trackLengthCm)) {
             throw new StoreError(400, "所選走廊軌道型號與單價不符；請改選自訂款。");
         }
         if (spotlightSelection !== null && spotlightSelection !== "custom" &&
@@ -1369,7 +1390,7 @@ export function validateState(data) {
             lightSpecSource,
             fixtureUnitPrice,
             installationUnitPrice,
-            trackLengthCm: trackAssembly ? item.trackLengthCm : null,
+            trackLengthCm: trackAssembly ? item.trackLengthCm ?? 150 : null,
             trackSelection,
             spotlightQuantity: trackAssembly ? item.spotlightQuantity : null,
             spotlightUnitPrice,

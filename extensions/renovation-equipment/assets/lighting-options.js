@@ -116,14 +116,15 @@ export const TRACK_RAIL_OPTIONS = Object.freeze({
     "tr-plus-150": Object.freeze({
         label: "特力屋黑色軌道 1.5 米（屋主提供 NT$349）",
         model: CORRIDOR_TRACK_MODEL,
+        trackLengthCm: 150,
         unitPrice: CORRIDOR_TRACK_PRICE_TWD,
         source: "特力屋（屋主提供黑色 1.5 米軌道 NT$349；商品連結待核）",
     }),
     custom: Object.freeze({
-        label: "自訂 1.5 米軌道（請填單價）",
-        model: "軌道 1.5 米（自訂型號待填）",
+        label: "自訂軌道（請填長度與單價）",
+        model: "軌道（自訂型號與長度待填）",
         unitPrice: null,
-        source: "自訂 1.5 米軌道；價格、軌道與燈具相容性待核",
+        source: "自訂軌道；長度、價格、軌道與燈具相容性待核",
     }),
 });
 

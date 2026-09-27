@@ -1,7 +1,7 @@
 import {
     installationSubtotal, isQuotedEquipment, itemSubtotal, spotlightSubtotal,
 } from "./budget.js";
-import { outdoorACZone } from "./ac-outdoors.js";
+import { isSplitAirConditioner, outdoorACZone } from "./ac-outdoors.js";
 import { planDisplayCategory } from "./plan-visibility.js";
 import { roomGeometry } from "./floorplan.js";
 import {
@@ -94,6 +94,7 @@ const CSV_COLUMNS = Object.freeze([
     "天花淨高（cm）", "每盞瓦數（W）", "每盞光通量（lm）",
     "光束角（度）", "光學資料來源", "照度資料待補",
     "來源標位 ID", "標位類型（示意，非施工核可）",
+    "冷氣規劃狀態", "冷氣施工費（未核）", "單條燈軌長度（cm）",
 ]);
 
 export function itemListCsv(state) {
@@ -135,7 +136,8 @@ export function itemListCsv(state) {
             item.circuitOutletId ?? "",
             Math.round(item.placement.x * 1000) / 10,
             Math.round(item.placement.y * 1000) / 10,
-            item.outdoorPlacement ? outdoorACZone(item).label : "",
+            item.outdoorPlacement ? outdoorACZone(item).label :
+                isSplitAirConditioner(item) ? "未確認室外機位／對外路徑，非可施工配置" : "",
             item.outdoorWidthCm && item.outdoorDepthCm
                 ? `${item.outdoorWidthCm}×${item.outdoorDepthCm}` : "",
             item.priceSource, item.note,
@@ -149,6 +151,9 @@ export function itemListCsv(state) {
             item.outletPlanPointId ?? "",
             item.outletPlanPointId ? ({ R: "一般電源", B: "專用供電端點", C: "弱電非電源" })[
                 item.outletPlanPointId[0]] : "",
+            isSplitAirConditioner(item) ? item.acPlanStatus ?? "active" : "",
+            isSplitAirConditioner(item) ? "待報：人工、支架、冷媒管、排水、許可及電氣；不列入本體暫計" : "",
+            item.lightType === "track" ? item.trackLengthCm ?? 150 : "",
         ].map(csvCell).join(",");
     });
     return "\ufeff" + [CSV_COLUMNS.map(csvCell).join(","), ...rows].join("\r\n") + "\r\n";

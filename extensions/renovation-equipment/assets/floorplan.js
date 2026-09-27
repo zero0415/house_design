@@ -8,7 +8,7 @@ import {
 import {
     isBathGrabBar, isFreshAirUnit, isHeatedTowelRail, isToiletRinseKit,
 } from "./bathroom-fixtures.js";
-import { CORRIDOR_TRACK_LENGTH_CM } from "./track-lighting.js";
+import { trackLengthCm } from "./track-lighting.js";
 import { objectIconKind, renderObjectIcon } from "./plan-icons.js";
 import { kitchenDrawOrder } from "./kitchen-icons.js";
 import { diagramPointSymbol } from "./outlet-diagram.js";
@@ -17,6 +17,8 @@ import {
     isDedicatedCircuit, isQuotedOutlet, isSocket, isWeakCurrent,
 } from "./socket-plan.js";
 import { isQuotedEquipment } from "./budget.js";
+import { markerQuoteProvenance, quoteProvenance } from "./quote-provenance.js";
+import { laundryMarkerNote } from "./laundry-notes.js";
 import { renderLightingPreview } from "./lighting-preview.js";
 import { previewCircuitLinks } from "./circuit-preview.js";
 import { BEDROOM2_PARTITION_ID, BEDROOM2_PARTITION_OPTIONS } from "./partition-options.js";
@@ -308,10 +310,62 @@ export function markerPosition(item, geometry) {
         y: geometry.y + item.placement.y * geometry.height };
 }
 
+export function guestVanityAssessment(items, geometry) {
+    const ids = ["bath-guest-vanity", "bath-guest-tub", "bath-guest-toilet"];
+    const fixtures = ids.map((id) => items.find((item) => item.id === id &&
+        item.roomId === "bath-guest"));
+    const vanity = fixtures[0];
+    if (!vanity) return null;
+    const caution = "客浴壁掛浴櫃僅條件式暫位，非可施工配置；現位置及給排水不自動搬移。" +
+        "門扇、浴缸／馬桶、磁磚完成面、固定承重及管線仍須現場實測。";
+    if (!geometry.cmScale || fixtures.some((item) =>
+        !item?.placement || !item.widthCm || !item.depthCm)) {
+        return { conflict: false, warning: `${caution} 尺寸或標位尚未齊全，不能確認間隙。` };
+    }
+    const [cabinet, tub, toilet] = fixtures.map((item) => {
+        const point = markerPosition(item, geometry);
+        const size = placementFootprint(item, geometry);
+        return {
+            left: (point.x - geometry.x - size.width / 2) / geometry.cmScale,
+            right: (point.x - geometry.x + size.width / 2) / geometry.cmScale,
+            top: (point.y - geometry.y - size.height / 2) / geometry.cmScale,
+            bottom: (point.y - geometry.y + size.height / 2) / geometry.cmScale,
+        };
+    });
+    const overlaps = (other) => cabinet.top < other.bottom && cabinet.bottom > other.top
+        ? Math.max(0, Math.min(cabinet.right, other.right) - Math.max(cabinet.left, other.left)) : 0;
+    const tubOverlapCm = overlaps(tub);
+    const toiletOverlapCm = overlaps(toilet);
+    const gapCm = toilet.left - tub.right;
+    const centerXCm = (tub.right + toilet.left) / 2;
+    const moveXCm = centerXCm - (cabinet.left + cabinet.right) / 2;
+    const sideClearanceCm = (gapCm - (cabinet.right - cabinet.left)) / 2;
+    const cm = (value) => value.toFixed(2);
+    const overlapText = [
+        tubOverlapCm > 0 ? `與浴缸圖示水平重疊約${cm(tubOverlapCm)}cm` : "",
+        toiletOverlapCm > 0 ? `與馬桶圖示水平重疊約${cm(toiletOverlapCm)}cm` : "",
+    ].filter(Boolean).join("、");
+    const comparison = gapCm > 0 && sideClearanceCm >= 0
+        ? `僅作比較：若置中，左右各約${cm(sideClearanceCm)}cm，中心距房間左緣約${cm(centerXCm)}cm` +
+            `（相對現位${moveXCm >= 0 ? "向右" : "向左"}約${cm(Math.abs(moveXCm))}cm），不自動套用且非建議施工定位。`
+        : "目前寬度無法在該橫向間隙置中，不提供自動定位。";
+    return { gapCm, centerXCm, moveXCm, sideClearanceCm, tubOverlapCm, toiletOverlapCm,
+        conflict: tubOverlapCm > 0 || toiletOverlapCm > 0,
+        warning: `${caution} 目前寬${vanity.widthCm}×深${vanity.depthCm}cm；` +
+            `按目前圖示寬${cm(geometry.width / geometry.cmScale)}cm、轉向與占地，浴缸右緣約${cm(tub.right)}cm、馬桶左緣約${cm(toilet.left)}cm，` +
+            `橫向間隙約${cm(gapCm)}cm。${overlapText ? `${overlapText}，原位保留待核。` :
+                "未見這兩個圖示的占地重疊，不等於淨空、管線或施工已核可。"}${comparison}` };
+}
+
 function escapeSvg(value) {
     return String(value ?? "").replace(/[&<>"']/g, (character) => ({
         "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
     })[character]);
+}
+
+function quoteMarkerAttributes(source) {
+    return source ? `data-quote-provenance="${escapeSvg(source)}"
+        aria-description="${escapeSvg(source)}"` : "";
 }
 
 export function renderReferenceSchematic(rooms, {
@@ -388,13 +442,13 @@ function usesSquareLabel(item, iconKind) {
         isSplitAirConditioner(item) || item.name?.includes("冷氣"));
 }
 
-function trackLightingSymbol(item) {
-    if (item.trackLengthCm !== CORRIDOR_TRACK_LENGTH_CM ||
-        !Number.isSafeInteger(item.spotlightQuantity) ||
+function trackLightingSymbol(item, scale = PLAN_PIXELS_PER_CM) {
+    const railLength = trackLengthCm(item.trackLengthCm);
+    if (!Number.isSafeInteger(item.spotlightQuantity) ||
         item.spotlightQuantity < 0 || item.spotlightQuantity > 12) {
         throw new RangeError("走廊軌道燈長度或燈具數量無效，無法繪圖。");
     }
-    const length = item.trackLengthCm * PLAN_PIXELS_PER_CM;
+    const length = railLength * scale;
     const half = length / 2;
     const lamps = Array.from({ length: item.spotlightQuantity }, (_, index) => {
         const y = (index + 0.5) / item.spotlightQuantity * length - half;
@@ -511,13 +565,16 @@ function renderDoorDimension(door) {
 
 function renderDoor(door, items, overview, showDimension = true) {
     const chosen = selectedDoor(door, items);
+    const item = items.find((entry) => entry.kind === "door" && entry.doorId === door.id);
+    const source = markerQuoteProvenance(item, items);
     const icon = chosen.glass ? "玻" : chosen.kind === "slide" ? "拉" : "門";
     return `<g class="${overview ? "plan-door-mark" : "detail-door"}
         ${chosen.kind} ${chosen.glass ? "glass" : ""} ${chosen.quoted ? "" : "unpriced"}
         material-${escapeSvg(chosen.material)}"
         data-door-material="${escapeSvg(chosen.material)}"
+        ${quoteMarkerAttributes(source)}
         ${overview ? `data-select-room="${escapeSvg(chosen.owner)}"
-            role="button" tabindex="0"` : ""}
+            role="button" tabindex="0"` : source ? 'role="img" tabindex="0"' : ""}
         aria-label="${escapeSvg(chosen.label)}（${escapeSvg(chosen.materialLabel)}；
             ${chosen.quoted ? "已列原報價" : "未列門片報價"}）">
         <title>${escapeSvg(chosen.label)}；${escapeSvg(chosen.materialLabel)}；
@@ -525,7 +582,7 @@ function renderDoor(door, items, overview, showDimension = true) {
             `門洞淨寬 ${chosen.widthCm}cm` : "門洞淨寬待量，開口線僅示意"}；
             ${chosen.heightCm ? `門洞淨高 ${chosen.heightCm}cm` : "門高待確認"}；
             ${chosen.quoted ? "原報價已有此門片，門型變更需重新估價" :
-                "新增或既有入口，未列入本次門片報價"}</title>
+                "新增或既有入口，未列入本次門片報價"}${source ? `；${escapeSvg(source)}` : ""}</title>
         ${doorShape(chosen)}
         ${overview ? `<rect class="door-hitbox" x="${chosen.x - 18}" y="${chosen.y - 18}"
             width="36" height="36"/>
@@ -550,6 +607,7 @@ function renderBedroom2Partition(items) {
     const partition = items.find((item) => item.id === BEDROOM2_PARTITION_ID);
     if (!partition) return "";
     const option = BEDROOM2_PARTITION_OPTIONS[partition.partitionMaterial];
+    const source = quoteProvenance(partition);
     if (!option) throw new RangeError("臥室2輕隔間做法無效，無法標示牆線。");
     const zone = HOUSE_ZONE_BY_ID.get("bedroom-2");
     const door = doors.find((entry) => entry.id === "bedroom-2");
@@ -566,10 +624,11 @@ function renderBedroom2Partition(items) {
     ].filter(Boolean).join(" ");
     return `<g class="partition-walls material-${escapeSvg(partition.partitionMaterial)}"
         data-select-partition="${BEDROOM2_PARTITION_ID}" role="button" tabindex="0"
+        ${quoteMarkerAttributes(source)}
         aria-label="臥室2對客廳和走廊兩道輕隔間共用${escapeSvg(option.label)}，
             合計${escapeSvg(partition.quantity ?? "待填")}坪；點選調整做法">
         <title>臥室2兩道輕隔間：${escapeSvg(option.label)}；
-            原報價合計 5 坪，線條顏色和粗細不是施工牆厚</title>
+            原報價合計 5 坪，線條顏色和粗細不是施工牆厚；${escapeSvg(source)}</title>
         <path class="partition-wall-core"
             d="M${zone.x} ${zone.y} H${right} M${right} ${zone.y} V${bottom}"/>
         <path class="partition-wall-inner"
@@ -621,7 +680,9 @@ function renderExteriorPlatform(detail = false, items = []) {
     </g>`;
 }
 
-function overviewMarker(item, geometry, name, previewEnabled = false) {
+function overviewMarker(item, geometry, name, previewEnabled = false, items = []) {
+    const source = markerQuoteProvenance(item, items);
+    const vanity = item.id === "bath-guest-vanity" ? guestVanityAssessment(items, geometry) : null;
     const { x, y } = markerPosition(item, geometry);
     const { width, height } = itemFootprint(item, geometry);
     const circuit = isDedicatedCircuit(item);
@@ -674,12 +735,15 @@ function overviewMarker(item, geometry, name, previewEnabled = false) {
         ? "" : " out-of-bounds";
     return `<g class="overview-marker ${className}
         ${!squareLabel && iconKind && item.kind !== "furniture" ? "pictogram" : ""}
-        ${invalid}"
+        ${invalid} ${vanity?.conflict ? "fixture-overlap" : ""}"
         transform="translate(${x} ${y})"
+        ${quoteMarkerAttributes(source)}
         ${item.outletPlanPointId ? `data-outlet-point-id="${escapeSvg(item.outletPlanPointId)}"` : ""}
         ${previewEnabled && previewable ? `data-preview-item-id="${escapeSvg(item.id)}"
-            role="button" tabindex="0" aria-label="切換${escapeSvg(item.name)}的模擬照明"` : ""}>
-        <title>${escapeSvg(name)}：${escapeSvg(item.name)}
+            role="button" tabindex="0" aria-label="切換${escapeSvg(item.name)}的模擬照明"` :
+            source ? `role="button" tabindex="0" aria-label="${escapeSvg(item.name)}"` : ""}>
+        <title>${escapeSvg(name)}：${escapeSvg(item.name)}；${escapeSvg(laundryMarkerNote(item))}
+            ${escapeSvg(vanity?.warning ?? "")}
             ${airConditioner ? `，出風${directionName(item.orientation)}` :
                 freshAir ? "，室外進氣新風機暫定位置；機型、管路與價格待核" :
                     rinseKit ? "，馬桶旁三叉管與沖洗器；安裝及接頭待核" :
@@ -693,15 +757,14 @@ function overviewMarker(item, geometry, name, previewEnabled = false) {
                         : "新增一般插座暫估 NT$1,800；專用迴路須另列"}` :
                     downlight ? "，天花崁燈示意（含燈具、配線及安裝）" :
                         ceilingLight ? "，天花吸頂燈示意（商品與安裝分列；實價待核）" :
-                            trackLight ? `，150cm軌道及${item.spotlightQuantity}盞軌道燈示意，配線安裝另計` : ""}</title>
-        ${item.outletPlanPointId ? diagramPointSymbol(item) : squareLabel ? `${trackLight ? `<path class="square-track-extent"
-                d="M0 ${-item.trackLengthCm * (geometry.cmScale ??
-                    PLAN_PIXELS_PER_CM) / 2} V${item.trackLengthCm *
-                    (geometry.cmScale ?? PLAN_PIXELS_PER_CM) / 2}"
-                transform="rotate(${iconOrientation})"/>` : ""}
+                            trackLight ? `，${item.trackLengthCm}cm軌道及${item.spotlightQuantity}盞軌道燈示意，配線安裝另計` : ""}
+            ${source ? `；${escapeSvg(source)}` : ""}</title>
+        ${item.outletPlanPointId ? diagramPointSymbol(item) : squareLabel ? `${trackLight ? `<g
+                transform="rotate(${iconOrientation})">${trackLightingSymbol(item,
+                    geometry.cmScale ?? PLAN_PIXELS_PER_CM)}</g>` : ""}
             ${squareLabelSymbol(item, Math.max(16, Math.min(23, iconWidth, iconHeight)), true)}`
             : trackLight ? `<g transform="rotate(${iconOrientation})">
-                ${trackLightingSymbol(item)}</g>` : ceilingLight
+                ${trackLightingSymbol(item, geometry.cmScale ?? PLAN_PIXELS_PER_CM)}</g>` : ceilingLight
             ? `<circle class="ceiling-light-plate" r="17"/>
                 <circle class="ceiling-light-ring" r="12"/>`
             : downlight
@@ -796,10 +859,10 @@ function renderOutdoorAC(item, overview, selectedItemId = null, showRotateHandle
         aria-label="${escapeSvg(item.roomId === "bedroom-3" ? "臥室3鐵窗外" :
             zone.label)}的室外機暫位；按長 ${lengthCm}×短 ${depthCm} 公分暫估，
             已轉 ${orientation} 度，
-            非選定實機尺寸，也不能按圖示判斷可施工">
+            尺寸依商品或暫估資料，不含維修淨距，不能按圖示判斷可施工">
         <title>${escapeSvg(zone.label)}；與${escapeSvg(item.name)}共用一套機器價格；
             俯視占地長邊 ${lengthCm}×短邊 ${depthCm}cm 暫估，已轉 ${orientation}°；
-            型號與機身高度待選；
+            ${item.productId ? `${escapeSvg(item.brandModel)}；高度與維修淨距未畫入；` : "型號與機身高度待選；"}
             ${narrowWindow ? `現況 W${window.widthCm}cm 窗洞窄於機長，不能假設可由窗洞搬運；` : ""}
             ${beyondExterior ? "暫估機身超出圖示外側輪廓，須改位置或規格；" : ""}
             固定、鐵窗承重、散熱、維修與合法性待現勘</title>
@@ -869,7 +932,7 @@ export function renderOverviewPlan(rooms, items, showSource = false, activeLight
             .sort((a, b) => Boolean(a.outletPlanPointId) - Boolean(b.outletPlanPointId) ||
                 kitchenDrawOrder(a, b))
             .map((item) => overviewMarker(item, geometry, room.name,
-                activeLightIds !== null)).join("");
+                activeLightIds !== null, items)).join("");
         return `<g class="plan-zone tone-${zone.tone}" data-select-room="${zone.id}"
             role="button" tabindex="0" aria-label="放大查看${escapeSvg(room.name)}">
             <path class="zone-floor ${zone.id === "entry" ||
@@ -940,6 +1003,9 @@ function renderWetDryDivider(roomId, items, showRoomLabel = false) {
     const definition = doors.find((door) => door.id === reference.doorId);
     if (!definition) throw new RangeError(`找不到${roomId}的乾濕分離門。`);
     const door = selectedDoor(definition, items);
+    const source = items.filter((item) =>
+        [`${roomId}-wet-dry-glass`, `${roomId}-safety-film`].includes(item.id))
+        .map(quoteProvenance).filter(Boolean).join("\n");
     const gapStart = Math.max(reference.top, door.y - door.length / 2 - 4);
     const gapEnd = Math.min(reference.bottom, door.y + door.length / 2 + 4);
     const segments = [
@@ -947,8 +1013,9 @@ function renderWetDryDivider(roomId, items, showRoomLabel = false) {
         gapEnd < reference.bottom ? `M${reference.x} ${gapEnd} V${reference.bottom}` : "",
     ].filter(Boolean).join(" ");
     return `<g class="wet-dry-divider" role="img"
+        ${source ? 'tabindex="0"' : ""} ${quoteMarkerAttributes(source)}
         aria-label="${roomId === "bath-main" ? "主浴" : "客浴"}乾濕分離玻璃隔屏虛線，門洞另以玻璃門線表示">
-        <title>乾濕分離（一字）位置示意；隔屏長度及門洞淨寬待現場丈量</title>
+        <title>乾濕分離（一字）位置示意；隔屏長度及門洞淨寬待現場丈量；${escapeSvg(source)}</title>
         <path d="${segments}"/>
     </g>${showRoomLabel ? `<text class="room-reference" x="${reference.labelX}"
         y="${reference.labelY}" text-anchor="middle">${reference.label}</text>` : ""}`;
@@ -1004,7 +1071,9 @@ function renderItemDimensions(item, geometry, footprint, x, y) {
 }
 
 function detailMarker(item, geometry, selectedItemId, previewEnabled = false,
-    showRotateHandle = true) {
+    showRotateHandle = true, items = []) {
+    const source = markerQuoteProvenance(item, items);
+    const vanity = item.id === "bath-guest-vanity" ? guestVanityAssessment(items, geometry) : null;
     const { x, y } = markerPosition(item, geometry);
     const footprint = itemFootprint(item, geometry);
     const furniture = item.kind === "furniture" ? FURNITURE_TEMPLATES[item.furnitureType] : null;
@@ -1049,11 +1118,8 @@ function detailMarker(item, geometry, selectedItemId, previewEnabled = false,
             item.name.slice(0, measured && size.width >= 62 ? 4 : 2);
     const squareSize = Math.max(18, Math.min(30, footprint.width, footprint.height));
     const symbol = item.outletPlanPointId ? diagramPointSymbol(item) : squareLabel
-        ? `${trackLight ? `<path class="square-track-extent"
-                d="M0 ${-item.trackLengthCm * (geometry.cmScale ??
-                    PLAN_PIXELS_PER_CM) / 2} V${item.trackLengthCm *
-                    (geometry.cmScale ?? PLAN_PIXELS_PER_CM) / 2}"
-                transform="rotate(${orientation})"/>` : ""}
+        ? `${trackLight ? `<g transform="rotate(${orientation})">${trackLightingSymbol(item,
+                geometry.cmScale ?? PLAN_PIXELS_PER_CM)}</g>` : ""}
             ${squareLabelSymbol(item, squareSize, false)}`
         : furniture
         ? `<g class="furniture-body" transform="rotate(${orientation})">
@@ -1150,7 +1216,7 @@ function detailMarker(item, geometry, selectedItemId, previewEnabled = false,
                         transform="rotate(${orientation})"/>
                     <text class="ceiling-light-label" y="5" text-anchor="middle">頂</text>`
             : trackLight ? `<g transform="rotate(${orientation})">
-                ${trackLightingSymbol(item)}</g>`
+                ${trackLightingSymbol(item, geometry.cmScale ?? PLAN_PIXELS_PER_CM)}</g>`
             : iconKind
                 ? `<g class="equipment-body" transform="rotate(${orientation})">
                     <rect class="object-hitbox"
@@ -1211,14 +1277,16 @@ function detailMarker(item, geometry, selectedItemId, previewEnabled = false,
                     wallHeater ? "unsized wall-heater" :
                     measured ? "" : "unsized"}
             ${!squareLabel && iconKind && !furniture ? "pictogram" : ""}
-            ${invalid ? "out-of-bounds" : ""} ${item.id === selectedItemId ? "selected" : ""}"
+            ${invalid ? "out-of-bounds" : ""} ${vanity?.conflict ? "fixture-overlap" : ""}
+            ${item.id === selectedItemId ? "selected" : ""}"
             data-marker-id="${escapeSvg(item.id)}" role="button" tabindex="0"
+            ${quoteMarkerAttributes(source)}
             ${item.outletPlanPointId ? `data-outlet-point-id="${escapeSvg(item.outletPlanPointId)}"` : ""}
             aria-label="${previewEnabled && (switchOption || downlight ||
                 ceilingLight || trackLight) ? "切換模擬照明：" : "拖動"}
                 ${escapeSvg(item.name)}${previewEnabled && (switchOption || downlight ||
                 ceilingLight || trackLight) ? "" : "的位置"}">
-            <title>${escapeSvg(item.name)}${airConditioner ? `，出風${directionName(item.orientation)}` :
+            <title>${escapeSvg(item.name)}；${escapeSvg(vanity?.warning ?? "")}${escapeSvg(laundryMarkerNote(item))}${source ? `；${escapeSvg(source)}；` : ""}${airConditioner ? `，出風${directionName(item.orientation)}` :
                 freshAir ? "，室外進氣位置示意，機型及浴室適用性待核" :
                     rinseKit ? "，馬桶三叉管和沖洗器；安裝費及接頭待確認" :
                         towelRail ? "，衛浴非淋浴側牆面暫位；配線防潮及安裝待確認" :
@@ -1232,7 +1300,7 @@ function detailMarker(item, geometry, selectedItemId, previewEnabled = false,
                         : "新增一般插座暫估 NT$1,800；專用迴路另列"}` :
                     downlight ? "，天花崁燈位置示意" :
                         ceilingLight ? "，客廳天花吸頂燈位置示意" :
-                            trackLight ? `，150cm軌道與${item.spotlightQuantity}盞燈的配置` : ""}
+                            trackLight ? `，${item.trackLengthCm}cm軌道與${item.spotlightQuantity}盞燈的配置` : ""}
                 （${circuit ? "紫色標記與配對虛線不是實際配線路徑" :
                     socket ? "圖示非插座實際尺寸、安裝高度或已確認插孔型式" :
                     freshAir ? "圖示非機身尺寸，未繪室外進氣與排濕管路" :
@@ -1413,7 +1481,7 @@ export function renderRoomPlan(room, items, selectedItemId, allItems = items,
             .sort((a, b) => Boolean(a.outletPlanPointId) - Boolean(b.outletPlanPointId) ||
                 kitchenDrawOrder(a, b))
             .map((item) => detailMarker(item, geometry, selectedItemId,
-                activeLightIds !== null, showRotateHandle)).join("")}
+                activeLightIds !== null, showRotateHandle, items)).join("")}
         <g class="detail-scale" transform="translate(${viewX + 22} ${viewY + 40})">
             <path d="M0 0 H${gridSize}
                 M0 -5 V5 M${gridSize} -5 V5"/>

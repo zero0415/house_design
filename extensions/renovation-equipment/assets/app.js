@@ -1,11 +1,13 @@
 import {
-    doorsForRoom, isBalconyHeaterPlaceholder, knownRoomIds, markerPosition,
+    doorsForRoom, guestVanityAssessment, isBalconyHeaterPlaceholder, knownRoomIds, markerPosition,
     placementFootprint, renderOverviewPlan, renderReferenceSvg, renderRoomPlan,
     roomGeometry, windowsForRoom,
 } from "./floorplan.js";
 import { FURNITURE_TEMPLATES } from "./furniture.js";
 import { KITCHEN_SAFETY, renderKitchenReference } from "./kitchen-plan.js";
 import { OUTLET_POINT_WARNINGS } from "./outlet-diagram.js";
+import { installationQuoteProvenance, quoteProvenance } from "./quote-provenance.js";
+import { conditionalGasDryerWarning, laundryDimensions } from "./laundry-notes.js";
 import { objectIconKind } from "./plan-icons.js";
 import {
     catalogType, customEquipment, equipmentCatalog,
@@ -59,17 +61,17 @@ import {
     TRACK_RAIL_OPTIONS, TRACK_SPOTLIGHT_OPTIONS,
 } from "./lighting-options.js";
 import {
-    CORRIDOR_TRACK_ID, CORRIDOR_TRACK_INSTALL_PRICE_TWD, CORRIDOR_TRACK_LENGTH_CM,
+    CORRIDOR_TRACK_ID, CORRIDOR_TRACK_INSTALL_PRICE_TWD,
 } from "./track-lighting.js";
 import { renderSurvey } from "./survey.js";
 import {
     PLAN_PIXELS_PER_CM, ROOM_DRAWING_DIMENSIONS, footprintFits, nearestRoomCenter, pointInZone,
 } from "./house-geometry.js";
 import {
-    isActiveSplitAirConditioner, isSplitAirConditioner, outdoorACFootprint,
+    airConditioningWarnings, isActiveSplitAirConditioner, isSplitAirConditioner, outdoorACFootprint,
     outdoorACPosition, outdoorACSceneConflict, outdoorACZone, outdoorACZoneChoices,
-    OUTDOOR_AC_ANCHOR,
-    OUTDOOR_AC_ESTIMATED_SIZE_CM, OUTDOOR_AC_SIZE_BOUNDS_CM, OUTDOOR_AC_ZONES,
+    OUTDOOR_AC_ANCHOR, OUTDOOR_AC_ESTIMATED_SIZE_CM,
+    OUTDOOR_AC_SIZE_BOUNDS_CM, OUTDOOR_AC_ZONES,
 } from "./ac-outdoors.js";
 import {
     decodeSave, downloadFile, encodeSave, itemListCsv, MAX_SAVE_BYTES,
@@ -136,6 +138,60 @@ function escapeHtml(value) {
         '"': "&quot;",
         "'": "&#39;",
     })[character]);
+}
+
+const quoteTooltip = document.createElement("div");
+quoteTooltip.className = "quote-tooltip";
+quoteTooltip.setAttribute("role", "tooltip");
+quoteTooltip.hidden = true;
+document.body.append(quoteTooltip);
+let quoteTooltipOwner = null;
+let quoteTooltipTimer;
+
+function hideQuoteTooltip() {
+    clearTimeout(quoteTooltipTimer);
+    quoteTooltip.hidden = true;
+    quoteTooltipOwner = null;
+}
+
+function showQuoteTooltip(target) {
+    if (!target) return;
+    clearTimeout(quoteTooltipTimer);
+    quoteTooltipOwner = target;
+    quoteTooltip.textContent = target.dataset.quoteProvenance;
+    quoteTooltip.hidden = false;
+    const bounds = target.getBoundingClientRect();
+    const tip = quoteTooltip.getBoundingClientRect();
+    quoteTooltip.style.left = `${Math.max(8, Math.min(bounds.left, innerWidth - tip.width - 8))}px`;
+    quoteTooltip.style.top = `${Math.max(8, bounds.bottom + tip.height + 8 < innerHeight
+        ? bounds.bottom + 4 : bounds.top - tip.height - 4)}px`;
+}
+
+content.addEventListener("pointerover", (event) => {
+    showQuoteTooltip(event.target.closest("[data-quote-provenance]"));
+});
+content.addEventListener("pointerout", (event) => {
+    if (quoteTooltipOwner?.contains(event.relatedTarget) || quoteTooltip.contains(event.relatedTarget)) return;
+    quoteTooltipTimer = setTimeout(hideQuoteTooltip, 120);
+});
+quoteTooltip.addEventListener("pointerenter", () => clearTimeout(quoteTooltipTimer));
+quoteTooltip.addEventListener("pointerleave", hideQuoteTooltip);
+content.addEventListener("focusin", (event) =>
+    showQuoteTooltip(event.target.closest("[data-quote-provenance]")));
+content.addEventListener("focusout", hideQuoteTooltip);
+window.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") hideQuoteTooltip();
+});
+window.addEventListener("scroll", () => {
+    if (quoteTooltipOwner && document.activeElement === quoteTooltipOwner) showQuoteTooltip(quoteTooltipOwner);
+    else hideQuoteTooltip();
+}, true);
+window.addEventListener("resize", hideQuoteTooltip);
+
+function renderQuoteBadge(source, label) {
+    return `<span class="quoted-tag quote-provenance" tabindex="0"
+        title="${escapeHtml(source)}" aria-description="${escapeHtml(source)}"
+        data-quote-provenance="${escapeHtml(source)}">${escapeHtml(label)}</span>`;
 }
 
 function setStatus(message, kind = "info") {
@@ -537,7 +593,7 @@ function field(item, name, label, options = {}) {
     const outdoorDimension = name === "outdoorWidthCm" || name === "outdoorDepthCm";
     const dimension = name === "widthCm" || name === "depthCm" ||
         name === "heightCm" || outdoorDimension;
-    const lightNumber = name === "lightWatts" || name === "lightLumens" ||
+    const lightNumber = name === "trackLengthCm" || name === "lightWatts" || name === "lightLumens" ||
         name === "beamAngleDeg";
     const trackLength = name === "trackLengthM" || name === "quantity" && isSlideTrack(item);
     const spotCount = name === "spotlightQuantity";
@@ -545,7 +601,7 @@ function field(item, name, label, options = {}) {
         name === "unitPrice" || name === "installationUnitPrice" ||
         name === "fixtureUnitPrice" || name === "spotlightUnitPrice";
     const lightMinimum = name === "lightWatts" ? .1 : 1;
-    const lightMaximum = name === "lightWatts" ? 1000 :
+    const lightMaximum = name === "trackLengthCm" ? 3000 : name === "lightWatts" ? 1000 :
         name === "lightLumens" ? 200000 : 180;
     const inputType = numeric
         ? `type="number" min="${name === "outdoorWidthCm"
@@ -592,13 +648,13 @@ function field(item, name, label, options = {}) {
             "unit", "unitPrice", "installationUnitPrice", "fixtureUnitPrice",
             "brandModel", "priceSource", "spotlightModel", "spotlightQuantity",
             "spotlightUnitPrice", "spotlightPriceSource", "lightWatts",
-            "lightLumens", "beamAngleDeg", "lightSpecSource",
-        ].includes(name) || ["widthCm", "depthCm"].includes(name) &&
+            "lightLumens", "beamAngleDeg", "lightSpecSource", "trackLengthCm",
+        ].includes(name) || ["widthCm", "depthCm", "outdoorWidthCm", "outdoorDepthCm"].includes(name) &&
             state.products.find((entry) => entry.id === item.productId)?.[name] != null) ||
         fixedLightWatts;
     return `<label class="${cssClass}">${label}<input ${inputType} ${maxlength} ` +
         `${fixedQuoteLabel ? "readonly" : ""}
-        ${outdoorDimension ? "required" : ""}
+        ${outdoorDimension || name === "trackLengthCm" ? "required" : ""}
         ${isSplitAirConditioner(item) && item.acPlanStatus === "excluded" &&
             name === "unitPrice" ? "disabled" : ""} data-item-id="${id}" ` +
         `data-field="${name}" value="${value}"></label>`;
@@ -778,6 +834,8 @@ function renderItem(item, { displayName = null, circuitNumber = null } = {}) {
     const showerDoor = isShowerDoor(item);
     const quotedEquipment = isQuotedEquipment(item);
     const quoted = item.kind === "door" || quotedEquipment;
+    const quoteSource = quoteProvenance(item);
+    const installationSource = installationQuoteProvenance(item);
     const partition = item.id === BEDROOM2_PARTITION_ID;
     const quotedOutlet = isQuotedOutlet(item);
     const socket = isSocket(item);
@@ -835,7 +893,7 @@ function renderItem(item, { displayName = null, circuitNumber = null } = {}) {
             "含燈具、配線與安裝 · 天花位置可拖動" : null,
         ceilingLight ? `${item.unitPrice == null ? "燈具本體待報" :
             "燈具本體另計"} · 安裝另計` : null,
-        trackLighting ? `1 條 1.5 米軌道 · ${item.spotlightQuantity} 盞軌道燈 · 可拖動整組` : null,
+        trackLighting ? `1 條 ${item.trackLengthCm}cm 軌道 · ${item.spotlightQuantity} 盞軌道燈 · 可拖動整組` : null,
         freshAir ? "室外進氣 · 機型與本體價格待核" :
             rinseKit ? "馬桶旁三叉管＋沖洗器 · 安裝待核" : null,
         towelRail ? "衛浴乾區牆面暫位 · 電源、防潮及安裝待核" :
@@ -869,9 +927,10 @@ function renderItem(item, { displayName = null, circuitNumber = null } = {}) {
                 data-total-id="${id}">
                 ${amountLabel}
             </span>
-            ${quoted ? `<span class="quoted-tag">${removedSwitch ? "原額度保留／暫減待核" :
+            ${installationSource ? renderQuoteBadge(installationSource, "僅安裝已含") : ""}
+            ${quoted ? `${renderQuoteBadge(quoteSource, removedSwitch ? "原額度保留／暫減待核" :
                 fanInstallation ? "額度待核" :
-                showerDoor ? "已報價內門位" : "已含報價"}</span>
+                showerDoor ? "已報價內門位" : "已含報價")}
                 ${originalSwitch ? `<button type="button" class="quick-delete"
                     data-action="${removedSwitch ? "restore-switch" : "request-remove-item"}"
                     data-item-id="${id}">${removedSwitch ? "恢復" : "移除配置"}</button>` :
@@ -883,6 +942,8 @@ function renderItem(item, { displayName = null, circuitNumber = null } = {}) {
                     data-item-id="${id}" aria-label="刪除${escapeHtml(item.name)}">刪除</button>`}
         </summary>
         <div class="item-editor">
+        ${quoteSource || installationSource ? `<p class="quote-source-details">原報價來源：
+            ${escapeHtml(quoteSource ?? installationSource)}</p>` : ""}
         ${quoted ? `<p class="quoted-baseline">${fanInstallation
             ? `原報價是「暖風機安裝」1 組 × NT$2,500，
                 依你的指示暫拿此額度規劃新風機安裝，
@@ -975,7 +1036,9 @@ function renderItem(item, { displayName = null, circuitNumber = null } = {}) {
                 室外機先按機身長邊 ${item.outdoorWidthCm}cm、
                 短邊 ${item.outdoorDepthCm}cm 的<strong>俯視占地比例</strong>繪製，
                 預設長邊沿牆，目前轉向 ${item.outdoorOrientation ?? 0}°；
-                不是選定實機的寬深或機身高度。${item.outdoorPlacement &&
+                ${linkedProduct?.type === "split-ac"
+                    ? "寬深依連動商品規格；高度與維修淨距未畫入，室內機仍是定位圖示。"
+                    : "未核實商品尺寸；機身高度與維修淨距未畫入。"}${item.outdoorPlacement &&
                     windowsForRoom(item.roomId)
                     .some((window) => window.id === outdoorACZone(item).windowId &&
                         window.widthCm < item.outdoorWidthCm)
@@ -983,6 +1046,9 @@ function renderItem(item, { displayName = null, circuitNumber = null } = {}) {
                 ${item.outdoorPlacement && outdoorACSceneConflict(item)
                     ? "目前暫估輪廓超出圖示外側範圍，須調整位置或機型；" : ""}
                 固定、鐵窗承重、散熱、排水、施工出入與管線都需現場核對。`}</p>` : ""}
+        ${splitAC ? renderACItemWarnings(item) : ""}
+        ${renderLaundryWarnings([item])}
+        ${renderVanityWarning([item])}
         ${downlight && !isQuotedDownlight(item) ? `<p class="quoted-baseline">
             這顆崁燈為原報 6 顆以外新增，燈具本體與安裝拆價合併計算追加；
             原 6 顆的 NT$950 額度不增加。燈具規格、濕區防護、開孔和實際工資待核。
@@ -997,7 +1063,7 @@ function renderItem(item, { displayName = null, circuitNumber = null } = {}) {
             若現場改價，請修改下方單價。
         </p>` : ""}
         ${trackLighting ? `<p class="quoted-baseline">
-            ${escapeHtml(roomName(item.roomId))} ${CORRIDOR_TRACK_LENGTH_CM}cm 軌道及
+            ${escapeHtml(roomName(item.roomId))} ${item.trackLengthCm}cm 軌道及
             ${item.spotlightQuantity} 盞所選軌道燈；
             ${item.id === CORRIDOR_TRACK_ID
                 ? "原選款參考價格由你提供；" :
@@ -1045,14 +1111,15 @@ function renderItem(item, { displayName = null, circuitNumber = null } = {}) {
                 field(item, "unitPrice", bathroomInstallationIncluded
                     ? "商品本體單價（安裝原報已含）" : showerDoor ? "額外門型價差" :
                     ceilingLight ? "燈具本體單價（待選）" :
-                        trackLighting ? "軌道單價（1.5 米）" :
+                        trackLighting ? "軌道單價（元／條）" :
                             circuit ? "專用迴路單價（暫估 4,500）" :
                                 socket ? "插座單價（暫估 1,800）" : "單價",
                     { cssClass: "price" })}
             ${bathroomInstallationIncluded ? field(item, "installationUnitPrice",
                 "安裝費（NT$0，原報已含）",
                 { cssClass: "installation-price" }) : ""}
-            ${trackLighting ? field(item, "spotlightModel", "軌道燈型號（可修改）",
+            ${trackLighting ? field(item, "trackLengthCm", "單條軌道長度（cm）",
+                { cssClass: "dimension" }) + field(item, "spotlightModel", "軌道燈型號（可修改）",
                 { cssClass: "model" }) +
                 field(item, "spotlightQuantity", "軌道燈數量（盞）",
                     { cssClass: "spotlight-count" }) +
@@ -1257,8 +1324,13 @@ function productDraft(product = null) {
         note: product?.note ?? "",
         widthCm: String(product?.widthCm ?? ""),
         depthCm: String(product?.depthCm ?? ""),
+        heightCm: String(product?.heightCm ?? ""),
+        outdoorWidthCm: String(product?.outdoorWidthCm ?? ""),
+        outdoorDepthCm: String(product?.outdoorDepthCm ?? ""),
+        outdoorHeightCm: String(product?.outdoorHeightCm ?? ""),
         spotlightModel: product?.spotlightModel ?? "",
         spotlightQuantity: String(product?.spotlightQuantity ?? 3),
+        trackLengthCm: String(product?.trackLengthCm ?? 150),
         spotlightUnitPrice: String(product?.spotlightUnitPrice ?? ""),
         lightWatts: String(product?.lightWatts ?? ""),
         lightLumens: String(product?.lightLumens ?? ""),
@@ -1276,6 +1348,8 @@ function productDraftChanged(draft) {
 function productPriceSummary(product) {
     const amount = (value, code = "TWD") => value == null
         ? "待補" : `${currencySymbols[code]}${currency.format(value)}`;
+    if (product.type === "split-ac") return `室內＋室外一套本體 ${amount(product.unitPrice)}；施工未報、不另計室外機`;
+    if (product.type === "window-ac") return `未選用窗型候選 ${amount(product.unitPrice)}；施工未報`;
     if (product.type === "ceiling") {
         return `本體 ${amount(product.unitPrice, product.priceCurrency)} ＋ 安裝
             ${amount(product.installationUnitPrice)}`;
@@ -1291,7 +1365,7 @@ function productPriceSummary(product) {
         const spots = product.spotlightQuantity === 0 ? 0 :
             product.spotlightUnitPrice == null ? null :
                 product.spotlightQuantity * product.spotlightUnitPrice;
-        return `軌道 ${amount(product.unitPrice)} ＋
+        return `${product.trackLengthCm ?? 150}cm 軌道 ${amount(product.unitPrice)} ＋
             ${product.spotlightQuantity} 盞燈 ${amount(spots)} ＋
             安裝 ${amount(product.installationUnitPrice)}`;
     }
@@ -1304,11 +1378,11 @@ function renderProductForm() {
     const lighting = ["ceiling", "recessed", "track"].includes(type);
     const environmentChoices = type === "equipment"
         ? ["indoor", "balcony", "any"]
-        : ["recessed", "track"].includes(type)
+        : ["recessed", "track", "split-ac", "window-ac"].includes(type)
             ? ["indoor"] : ["indoor", "balcony"];
     const priceLabel = type === "recessed" ? "每顆燈具本體單價" :
         type === "ceiling" ? "每盞燈具本體單價" :
-            type === "track" ? "每條 1.5 米軌道單價" :
+            type === "track" ? "每條軌道單價" :
                 type === "outlet-general" ? "每個一般插座單價（暫估 1,800）" :
                     type === "dedicated-circuit"
                         ? "每條專用迴路單價（暫估 4,500）" : "商品單價";
@@ -1360,7 +1434,11 @@ function renderProductForm() {
                         <input type="number" data-product-field="installationUnitPrice"
                             min="0" step="any"
                             value="${escapeHtml(draft.installationUnitPrice)}"></label>` : ""}
-                    ${type === "track" ? `<label class="model">軌道燈型號／規格
+                    ${type === "track" ? `<label class="dimension">單條軌道長度（cm）
+                        <input type="number" data-product-field="trackLengthCm"
+                            min="1" max="3000" step="any" required
+                            value="${escapeHtml(draft.trackLengthCm ?? 150)}"></label>
+                        <label class="model">軌道燈型號／規格
                         <input type="text" data-product-field="spotlightModel"
                             maxlength="200" value="${escapeHtml(draft.spotlightModel)}"></label>
                         <label class="quantity">燈具數量（0–12）
@@ -1389,13 +1467,26 @@ function renderProductForm() {
                         <p class="light-spec-note">只有光通量、光束角、可追溯來源及房高
                             都具備時才估算近似直射照度；否則僅按瓦數示意光圈。
                             軌道燈規格為<strong>每盞</strong>而非整條合計。</p>` : ""}
-                    ${type === "equipment" ? `<label class="dimension">商品寬度（cm）
+                    ${type === "equipment" || type === "split-ac" ? `<label class="dimension">${type === "split-ac" ? "室內機" : "商品"}寬度（cm）
                         <input type="number" data-product-field="widthCm" min="0.1"
                             max="3000" step="any" value="${escapeHtml(draft.widthCm)}">
-                    </label><label class="dimension">商品深度（cm）
+                    </label><label class="dimension">${type === "split-ac" ? "室內機" : "商品"}深度（cm）
                         <input type="number" data-product-field="depthCm" min="0.1"
                             max="3000" step="any" value="${escapeHtml(draft.depthCm)}">
                     </label>` : ""}
+                    ${type === "split-ac" ? `
+                        ${[["heightCm", "室內機高度", .1, 3000],
+                            ["outdoorWidthCm", "室外機寬度", 30, 250],
+                            ["outdoorDepthCm", "室外機深度", 15, 150],
+                            ["outdoorHeightCm", "室外機高度", .1, 3000]].map(([key, label, min, max]) =>
+                            `<label class="dimension">${label}（cm）
+                                <input type="number" data-product-field="${key}" min="${min}" max="${max}"
+                                    step="any" ${["outdoorWidthCm", "outdoorDepthCm"].includes(key) ? "required" : ""}
+                                    value="${escapeHtml(draft[key])}"></label>`).join("")}
+                        <p class="muted">僅替既有六個分離式冷氣項目換款；室內外一套計價。
+                            商品尺寸不等於安裝淨空，室外機位置與迴路不自動建立。</p>` : ""}
+                    ${type === "window-ac" ? `<p class="muted">窗型僅存候選，不可當分離式或一般家具放置。
+                        需合法對外開口；不是移動式或免排熱冷氣。</p>` : ""}
                     <label class="source">價格來源（商家或商品連結）
                         <input type="text" data-product-field="priceSource"
                             maxlength="450" value="${escapeHtml(draft.priceSource)}"></label>
@@ -1432,6 +1523,10 @@ function renderDatabaseView() {
                             已連動 ${used.length} 個（已標位
                             ${used.filter((item) => item.placement).length} 個）</small>
                         ${product.note ? `<small>${escapeHtml(product.note)}</small>` : ""}
+                        ${product.type === "split-ac" ? `<small>商品尺寸（寬×高×深cm）：室內
+                            ${product.widthCm ?? "待核"}×${product.heightCm ?? "待核"}×${product.depthCm ?? "待核"}；
+                            室外 ${product.outdoorWidthCm}×${product.outdoorHeightCm ?? "待核"}×${product.outdoorDepthCm}。
+                            不含安裝及維修淨空。</small>` : ""}
                         ${["ceiling", "recessed", "track"].includes(product.type)
                             ? `<small>光學：${product.lightWatts == null
                                 ? "瓦數待查" : `${product.lightWatts}W`} ·
@@ -1502,6 +1597,7 @@ function renderNewItemForm() {
         `<option value="${escapeHtml(room.id)}" ${draft.roomId === room.id ? "selected" : ""}>
             ${escapeHtml(room.name)}</option>`).join("");
     const availableTypes = Object.entries(PRODUCT_TYPES)
+        .filter(([key]) => !["split-ac", "window-ac"].includes(key))
         .filter(([key]) => draft.roomId !== "ac-platform" ||
             key === "equipment")
         .filter(([key]) => draft.roomId !== "balcony" ||
@@ -1607,7 +1703,11 @@ function renderNewItemForm() {
                         <input type="number" data-add-field="installationPrice" min="0"
                             step="any" value="${escapeHtml(draft.installationPrice)}">
                     </label>` : ""}
-                    ${type === "track" ? `<label class="model">軌道燈型號（預設 3 盞）
+                    ${type === "track" ? `<label class="dimension">單條軌道長度（cm）
+                        <input type="number" data-add-field="trackLengthCm"
+                            min="1" max="3000" step="any" required
+                            value="${escapeHtml(draft.trackLengthCm ?? 150)}"></label>
+                        <label class="model">軌道燈型號（預設 3 盞）
                         <input type="text" data-add-field="spotlightModel" maxlength="200"
                             value="${escapeHtml(draft.spotlightModel)}"></label>
                         <label class="price">每盞軌道燈單價
@@ -1645,7 +1745,7 @@ function renderNewItemForm() {
                         : type === "recessed"
                         ? "崁燈需填本體及安裝兩個單價才會列入已知總價；未填價格仍列待補。"
                         : type === "track"
-                            ? "新增一條 150cm 軌道與預設 3 盞軌道燈；可在明細調整燈數。"
+                            ? "按填寫長度新增一條軌道與預設 3 盞軌道燈；可在明細調整燈數，供應規格與相容性另核。"
                             : "新商品未經廠商確認；空白單價不視為免費。"}</p>` : ""}
             </div>
             <div class="add-actions">
@@ -1880,7 +1980,7 @@ function renderCorridorTrackControls(item) {
     return `<section class="corridor-light-choices" role="group"
         aria-label="走廊軌道、軌道燈及配線安裝費用">
         <h3>走廊軌道與軌道燈</h3>
-        <p class="quoted-baseline">一條 ${CORRIDOR_TRACK_LENGTH_CM}cm 黑色軌道及
+        <p class="quoted-baseline">一條 ${item.trackLengthCm}cm 軌道及
             ${item.spotlightQuantity} 盞軌道燈沿走廊天花示意；拖動軌道會帶著燈具一起移動。
             原報價只列每條 NT$${currency.format(CORRIDOR_TRACK_INSTALL_PRICE_TWD)}
             的安裝單價、數量未填且本次 0 元，此組軌道、燈具與安裝均屬追加暫估。</p>
@@ -1888,6 +1988,7 @@ function renderCorridorTrackControls(item) {
             ${field(item, "trackSelection", "軌道款式",
                 { cssClass: "light-selection" })}
             ${field(item, "brandModel", "軌道型號", { cssClass: "model" })}
+            ${field(item, "trackLengthCm", "單條軌道長度（cm）", { cssClass: "dimension" })}
             ${field(item, "unitPrice", "軌道單價（元／條）", { cssClass: "price" })}
             ${field(item, "spotlightSelection", "軌道燈款式",
                 { cssClass: "light-selection" })}
@@ -1905,8 +2006,9 @@ function renderCorridorTrackControls(item) {
         </div>
         <p class="corridor-light-cost" data-track-budget-id="${escapeHtml(item.id)}">
             ${trackBudgetLabel(item)}</p>
-        <small>預設價格依你提供的特力屋參考價；替代款若色溫不同，
-            請先核對軌道接頭、天花固定與施工實價。</small>
+        <small>價格依各款來源；燈頭與軌道的接頭、電壓及機電相容性未確認，
+            天花固定、供電接件與安裝須重報。光圈僅為示意，不保證走廊照度均勻。</small>
+        <p class="quoted-baseline">${escapeHtml(item.note)}</p>
     </section>`;
 }
 
@@ -1988,12 +2090,103 @@ function renderLightingAssessment(selectedRoom) {
     </section>`;
 }
 
+function renderVanityWarning(items) {
+    if (!items.some((item) => item.id === "bath-guest-vanity" && item.roomId === "bath-guest")) return "";
+    const room = state.rooms.find((entry) => entry.id === "bath-guest");
+    const assessment = guestVanityAssessment(state.items, roomGeometry(room));
+    const overlap = Number.isFinite(assessment.tubOverlapCm)
+        ? `與浴缸圖示約重疊 ${assessment.tubOverlapCm.toFixed(2)}cm` : "淨空待量";
+    return `<div class="plan-overlap-alert ac-planning-warning" role="alert"
+        data-vanity-warning="bath-guest-vanity"><strong>客浴浴櫃：${assessment.conflict
+            ? `${overlap}，原位保留待重排` : "條件式暫位，淨空待現勘"}</strong>
+        <details class="warning-details"><summary>查看浴缸、馬桶間隙與施工限制</summary>
+            <p>${escapeHtml(assessment.warning)}</p></details></div>`;
+}
+
+function renderLaundryWarnings(items) {
+    return items.map((item) => {
+        const warning = conditionalGasDryerWarning(item);
+        return warning ? `<div class="plan-overlap-alert ac-planning-warning" role="alert"
+            data-laundry-warning="${escapeHtml(item.id)}">
+            <strong>瓦斯烘衣機：外推鐵窗毛深約 78cm 與機身深 72.1cm 僅差約 5.9cm；
+                瓦斯排氣、防雨與承重未核，嚴禁據圖施工。</strong>
+            <details class="warning-details"><summary>查看瓦斯、排氣及維修限制</summary>
+                <p>${escapeHtml(warning)}</p></details></div>` : "";
+    }).join("");
+}
+
+function renderACItemWarnings(item) {
+    const warnings = airConditioningWarnings(item);
+    return warnings.length ? `<div class="plan-overlap-alert ac-planning-warning"
+        role="alert" data-ac-warning="${escapeHtml(item.id)}">
+        <strong>${escapeHtml(roomName(item.roomId))}｜條件式冷氣位置／選型待核</strong>
+        ${warnings.map((warning) => `<p>${escapeHtml(warning)}</p>`).join("")}
+    </div>` : "";
+}
+
+function renderACPlanningWarnings(items) {
+    const systems = items.filter(isActiveSplitAirConditioner);
+    if (!systems.length) return "";
+    const cues = systems.flatMap((item) => {
+        const messages = [];
+        if (!item.outdoorPlacement) {
+            messages.push("無已確認對外窗／室外機位／穿牆管路，非可施工配置");
+        } else {
+            const zone = outdoorACZone(item);
+            const window = windowsForRoom(item.roomId)
+                .find((entry) => entry.id === zone.windowId);
+            if (window?.widthCm < item.outdoorWidthCm) {
+                messages.push(`W${window.widthCm}cm 窗洞窄於 ${item.outdoorWidthCm}cm 室外機寬，搬運待核`);
+            }
+            if (zone.platform) messages.push("外推鐵窗承重、通風及許可未核，非可施工配置");
+            if (outdoorACSceneConflict(item)) {
+                messages.push("室外機與外牆／鐵窗圖示輪廓相交，原位保留待核");
+            }
+        }
+        if (/RB-S51HG1/.test(item.brandModel ?? "")) {
+            if (["bedroom-1", "bedroom-2", "bedroom-3", "studio"]
+                .includes(item.roomId)) messages.push("約2–3坪使用5.1kW有過大容量風險");
+        }
+        return messages.length ? [`<li data-ac-room-cue="${escapeHtml(item.id)}">
+            ${escapeHtml(roomName(item.roomId))}：${escapeHtml(messages.join("；"))}</li>`] : [];
+    });
+    const hasGree = systems.some((item) => /GPR-23HI/.test(item.brandModel ?? ""));
+    const chimeiRooms = systems.filter((item) => /RB-S51HG1/.test(item.brandModel ?? ""))
+        .map((item) => roomName(item.roomId));
+    return `<section class="ac-warning-group" aria-label="冷氣共同與各房施工警示">
+        <h3 class="ac-warning-heading">冷氣室外機</h3>
+        ${cues.length ? `<ul class="urgent-cues" role="alert">${cues.join("")}</ul>` : ""}
+        <details class="warning-details" data-explanation="ac">
+            <summary>冷氣共通注意事項｜${systems.length} 套暫定、非施工核可（展開）</summary>
+            <div class="ac-planning-warning">
+                <p>所有分離式室內外機同套本體只計一次；安裝、支架、冷媒管、
+                    排水、供電、散熱維修淨空與許可費未核，不在已知本體價內。
+                    商品坪數不等於專業熱負載設計；原報僅三條冷氣專線，
+                    ${systems.length} 套的實際容量、接地及保護須電工確認，
+                    未自動搬移任何機位或新增迴路。</p>
+                <p>室內隔間孔不代表已確認的對外排熱或冷媒管路；
+                    沒有室外機位的房間仍非可施工配置。</p>
+                ${hasGree ? `<p data-ac-model-caution="gree">
+                    GREE 兩商家的室內外尺寸標籤與室內高度 29.3／29.6cm 不一致；
+                    圖示暫採交叉核對的室外寬深，室內高度留白，
+                    須依原廠與實機確認，不代表安裝淨空。</p>` : ""}
+                ${chimeiRooms.length ? `<p data-ac-model-caution="chimei">
+                    目前僅${escapeHtml(chimeiRooms.join("、"))}選 CHIMEI 5.1kW；
+                    賣場標題 8–10 坪、內文 8–11 坪不一致，
+                    不可套用到 GREE 或當工程選型保證。</p>` : ""}
+            </div>
+        </details>
+    </section>`;
+}
+
 function renderPlanView() {
     const room = state.rooms.find((entry) => entry.id === planRoomId);
     const bedroom2Partition = state.items.find((item) => item.id === BEDROOM2_PARTITION_ID);
     const corridorTrack = state.items.find(isTrackLighting);
     const platformDryer = state.items.find((item) =>
         item.furnitureType === "dryer" && item.roomId === "ac-platform");
+    const balconyWasher = state.items.find((item) =>
+        item.furnitureType === "washer" && item.roomId === "balcony");
     const conflicts = planConflicts();
     const outdoorConflicts = state.items.filter((item) =>
         isActiveSplitAirConditioner(item) && item.outdoorPlacement &&
@@ -2200,6 +2393,9 @@ function renderPlanView() {
                 可拖動的設備、家具、開關及燈具均可在房間圖選取後點右上角 ↻
                 轉向；室外機也有自己的 ↻。門窗、牆線與固定水槽不屬可旋轉物件。</p>
             <div class="plan-display-actions">${visibleControls}${lightingControls}${sourceToggle}</div>
+            ${renderACPlanningWarnings(state.items)}
+            ${renderLaundryWarnings(state.items)}
+            ${renderVanityWarning(state.items)}
             ${visibilityNote}
             ${lightingLegend}
             ${renderLightingAssessment(null)}
@@ -2211,7 +2407,7 @@ function renderPlanView() {
                     .join("、")}；原位置已保留，請進入房間調整或現場核對。</p>` : ""}
             ${outdoorConflicts.length ? `<p class="plan-overlap-alert" role="alert">
                 ${outdoorConflicts.map((item) => escapeHtml(roomName(item.roomId))).join("、")}
-                的室外機暫估占地超出圖示外側輪廓，須核對機型、支架與位置。</p>` : ""}
+                的室外機占地超出圖示外側輪廓，須核對機型、支架與位置。</p>` : ""}
             ${renderOverviewPlan(state.rooms, state.items, showSourceOverlay,
                 lightingPreview ? litItemIds : null, visiblePlanLayers,
                 focusedCircuitId, lightingPlaneCm)}
@@ -2257,18 +2453,22 @@ function renderPlanView() {
                         配線安裝約 NT$${DOWNLIGHT_INSTALL_ESTIMATE_TWD} 供換款試算；
                         實際開孔與濕區防護須核對。` : ""}
                 ${state.items.some(isCeilingLight)
-                    ? '<span class="ceiling-light-key">頂</span>雙圈表示客廳吸頂燈的天花示意位置；燈具本體價格待填，配線及安裝暫按每盞 NT$1,200 另計，不屬原報價已含款項。' : ""}
+                    ? '<span class="ceiling-light-key">頂</span>雙圈表示各房吸頂燈的天花示意位置；選款本體另計，配線及安裝暫按每盞 NT$1,200 另計，不屬原報價已含款項。陽台需獨立核對戶外防護。' : ""}
                 ${state.items.some((item) => isActiveSplitAirConditioner(item) &&
                     item.outdoorPlacement)
                     ? `<span class="outdoor-ac-key">外</span>是與各房「冷氣」同套的室外機暫位，
                         除臥室3依屋主指定放鐵窗外，其餘靠現況窗外；
-                        外框先按沿牆 ${OUTDOOR_AC_ESTIMATED_SIZE_CM.width}×外推
-                        ${OUTDOOR_AC_ESTIMATED_SIZE_CM.depth}cm 暫估，占地可逐台編輯，
-                        並非實機型號或承重保證。窗外固定、散熱、施工動線和許可未核，
+                        已選商品的室外機寬深用於占地示意，不含機身高度和維修淨空；
+                        未選款則仍用 ${OUTDOOR_AC_ESTIMATED_SIZE_CM.width}×
+                        ${OUTDOOR_AC_ESTIMATED_SIZE_CM.depth}cm 暫估。
+                        窗外固定、散熱、施工動線和許可未核，
                         不另重複計價。` : ""}
                 ${state.items.some((item) => item.id === "ac-bedroom-2" &&
                     item.acPlanStatus === "excluded")
                     ? "臥室2無可確認的室外機管線路徑，依屋主選擇暫不規劃分離式，原室內標位仍保留。" : ""}
+                ${state.items.some((item) => item.id === "ac-bedroom-2" &&
+                    item.acPlanStatus === "active" && !item.outdoorPlacement)
+                    ? "臥室2雖列分離式條件式規劃，但無已確認的室外機位置或合法管線；不能據圖施工。" : ""}
                 ${state.items.some(isFreshAirUnit)
                     ? '<span class="bathroom-key fresh-air">新</span>標示兩間衛浴的室外進氣新風機暫位；本體規格與價格待核，不沿用暖風機型號或單價。' : ""}
                 ${state.items.some(isToiletRinseKit)
@@ -2278,7 +2478,7 @@ function renderPlanView() {
                 ${state.items.some(isBathGrabBar)
                     ? '<span class="bathroom-key grab-bar">扶</span>標示客浴浴缸牆面防滑扶手，固定承重與費用待確認。' : ""}
                 ${corridorTrack
-                    ? `<span class="track-light-key"></span>走廊黑線及圓點是一條 1.5 米軌道與
+                    ? `<span class="track-light-key"></span>走廊黑線及圓點是一條 ${corridorTrack.trackLengthCm}cm 軌道與
                         ${corridorTrack.spotlightQuantity} 盞軌道燈；點淺灰走廊可編輯，
                         拖動軌道時燈會一起移動。軌道、燈具和安裝均不在原報價總額內。` : ""}
                 主浴通主臥及客廳各一門，客廳側按你標示改畫拉門，報價單價仍需重核；
@@ -2297,6 +2497,12 @@ function renderPlanView() {
                 ${platformDryer ? "烘衣機暫放靠陽台一側。" : ""}
                 原圖沒有承重、材質、雨淋防護及許可資料，
                 ${platformDryer ? "兩種設備" : "室外機"}能否安裝須現場確認。</p>
+            <p class="plan-overlap-alert" role="alert">
+                <strong>引用價格與模型不構成可施工配置。</strong>
+                室外冷氣、陽台燈及外推鐵窗上的${platformDryer &&
+                    conditionalGasDryerWarning(platformDryer) ? "瓦斯" : ""}烘衣機須現場核對
+                合法性、承重、排氣、固定、排水、防護與實價；
+                客浴浴櫃和浴缸的實際淨空待現勘，不自行移位。</p>
             ${outside ? `<div class="outside-rooms"><strong>另加的房間：</strong>${outside}</div>` : ""}
             ${reference}
         </section>`;
@@ -2359,8 +2565,8 @@ function renderPlanView() {
         ${entry.id === room.id ? "selected" : ""}>${escapeHtml(entry.name)}</option>`).join("");
     const outdoorControls = splitAC && splitAC.acPlanStatus !== "excluded"
         ? `<section class="light-choices ac-outdoor-controls" role="group"
-            aria-label="室外機俯視占地暫估">
-            <h3>室外機占地（非實機尺寸）</h3>
+            aria-label="室外機俯視占地與淨空警示">
+            <h3>室外機占地（不含安裝淨空）</h3>
             <div class="fields">
                 ${field(splitAC, "outdoorWidthCm", "機身長邊（cm）",
                     { cssClass: "dimension" })}
@@ -2375,7 +2581,9 @@ function renderPlanView() {
                                     ${escapeHtml(zone.label)}</option>`).join("")}
                         </select></label>` : ""}
             </div>
-            <small>暫按 80×35cm 比例畫室外機，預設長邊沿外牆；
+            <small>${splitAC.productId ? "已選商品" : "未選款暫估"}寬深
+                ${splitAC.outdoorWidthCm}×${splitAC.outdoorDepthCm}cm 畫室外機，
+                預設長邊沿外牆；
                 可在同房候選窗位間拖動或從下拉切換，也能點右上角 ↻ 轉向。
                 窄窗警示表示暫估機長可能大於窗洞，搬運與固定須另核；
                 機身高度與維修淨距尚未計入；
@@ -2444,6 +2652,10 @@ function renderPlanView() {
             ${sourceToggle}
         </div>
         <h2>${escapeHtml(room.name)}</h2>
+        ${renderACPlanningWarnings(items)}
+        ${renderLaundryWarnings(room.id === "balcony" && platformDryer
+            ? [...items, platformDryer] : items)}
+        ${renderVanityWarning(items)}
         ${diagramLegend}
         ${roomSizeControls}
         ${roomOutlets.length || roomCircuits.length ? `<p class="door-legend">
@@ -2487,8 +2699,12 @@ function renderPlanView() {
             ${visiblePlanLayers.furniture ? "左側青灰圖示為現況泥作水槽" :
                 "左側現況泥作水槽圖示目前隨家具隱藏"}，
             水槽已依你要求旋轉 90°；原報價拆除說明列有此物，保留或拆除仍須確認。
-            洗衣機在資料中暫按 60×60cm 配置於陽台；
-            ${platformDryer ? "烘衣機改標於外推鐵窗的陽台側，並非確認可放置、固定或接電。"
+            ${balconyWasher
+                ? `洗衣機按 ${escapeHtml(laundryDimensions(balconyWasher))} 暫位於陽台；`
+                : "洗衣機位置尚未標示；"}
+            ${platformDryer ? `${conditionalGasDryerWarning(platformDryer) ? "瓦斯" : ""}烘衣機
+                按 ${escapeHtml(laundryDimensions(platformDryer))} 暫標於外推鐵窗陽台側，
+                不能據圖施工；占地不含排氣、維修或承重空間。`
                 : "烘衣機位置以目前圖面為準。"}
             熱水器仍標於陽台牆面，
             可點圖上 ↻ 旋轉；窄條圖示不代表機身實際尺寸或安裝高度。</p>` : ""}
@@ -2530,11 +2746,14 @@ function renderPlanView() {
                     "臥室3冷氣室外機圖示目前隨家具隱藏，原暫位與設備資料仍保留"}；
                 不是額外第六台機器。鐵窗承重、排熱及合法性未查，不能據圖推定可裝。</p>`
             : ""}
-        ${platform && items.some((item) => item.furnitureType === "dryer") ? `<p class="plan-overlap-alert"
-            role="note">烘衣機暫標在靠陽台的外推鐵窗上，60×60cm 是占地估值，
-            深度約 78cm 僅按圖面描繪，<strong>不表示鐵窗可承重或機器可露天使用</strong>。
-            機重、承台補強、固定防墜、雨水防護、專用電路、排氣與散熱、
-            維修動線及建管許可均須現勘核定；不得依此圖直接施工。</p>` : ""}
+        ${platform && platformDryer ? `<p class="plan-overlap-alert"
+            role="alert"><strong>${conditionalGasDryerWarning(platformDryer)
+                ? "瓦斯烘衣機" : "烘衣機"}不是可施工配置：</strong>
+            ${escapeHtml(laundryDimensions(platformDryer))}；平台圖示深度約 78cm，
+            未計框架、承台、排氣及維修淨空。${conditionalGasDryerWarning(platformDryer)
+                ? "選定瓦斯機深度 72.1cm，毛深餘量僅約 5.9cm；瓦斯安全與排氣路徑未核。"
+                : "機型與所需供能、排氣／排水方式待核。"}
+            鐵窗承重、合法性及防雨固定須現勘，不得據此圖直接施工。</p>` : ""}
         ${room.id === "bath-guest" ? `<p class="door-legend">乾濕分離玻璃門已移到下方淋浴區，
             避開浴缸；走廊側客浴入口門維持原圖位置。實際淨寬與門片開啟仍須現場核對。</p>` : ""}
         ${room.id === "bath-main" || room.id === "bath-guest"
@@ -2582,7 +2801,7 @@ function renderPlanView() {
                     : "天花固定、迴路及施工實價仍須核對。"}</p>` : ""}
         ${room.id === "corridor" && corridorTrack
             ? `<p class="door-legend"><span class="track-light-key"></span>黑線為一條
-                <strong>1.5 米天花軌道</strong>，圓點為
+                <strong>${corridorTrack.trackLengthCm}cm 天花軌道</strong>，圓點為
                 ${corridorTrack.spotlightQuantity} 盞軌道燈；可拖動整組。
                 軌道、燈具和配線安裝的目前價格與暫計詳見下方；原報價安裝
                 數量未填、本次 0 元，並非已含工程。燈具／軌道型號、天花固定、
@@ -2694,13 +2913,16 @@ function renderPlanView() {
             ? "原報價已列「調整馬桶位置」2 支共 4,000 元；是否涵蓋所選位置，以及排水、乾濕分離、門片開啟與尺寸，仍需現場確認。"
             : room.id === "balcony"
                 ? `請確認泥作水槽去留、陽台門淨寬、洗衣機給排水；
-                    ${platformDryer ? "移至鐵窗的烘衣機之承重、防雨、迴路與排氣尚未可施工；" : ""}
-                    熱水器的型式、供能與排氣另須核對。機器尺寸和價格待補。`
+                    ${platformDryer
+                        ? `${conditionalGasDryerWarning(platformDryer) ? "選定瓦斯" : "未核型號"}烘衣機
+                            僅在鐵窗條件暫位，承重、防雨與排氣尚未核可；` : ""}
+                    熱水器的型式、供能與排氣另須核對。商品占地不含安裝或維修淨空。`
             : platform
                 ? `臥室3室外機已與室內機連動，不另重複計價；
-                    ${platformDryer ? "烘衣機也只是鐵窗上的位置暫標。" : ""}
-                    實機尺寸、造價、合法性、承重錨固、防雨防墜、
-                    排熱通風、供電及維修動線均待確認。`
+                    ${platformDryer ? `${conditionalGasDryerWarning(platformDryer)
+                        ? "選定瓦斯" : "未核型號"}烘衣機仍只是鐵窗位置暫標。` : ""}
+                    安裝淨空、合法性、承重錨固、防雨防墜、供能排氣、
+                    供電及維修動線均待現勘，嚴禁據圖施工。`
             : room.id === "living-dining"
                 ? "電視暫靠客餐廳與主臥共用牆的客餐廳側；冰箱、沙發及電視外形均未實測，須核對插座、壁掛方式、走道與櫃體淨距。"
             : "圖面僅供討論相對位置；門片、窗位與設備安裝尺寸仍需現場確認。"}</p>
@@ -3307,8 +3529,8 @@ function itemFieldChanged(target) {
         "unit", "unitPrice", "priceCurrency", "installationUnitPrice",
         "fixtureUnitPrice", "brandModel", "priceSource", "spotlightModel",
         "spotlightQuantity", "spotlightUnitPrice", "spotlightPriceSource",
-        "lightWatts", "lightLumens", "beamAngleDeg", "lightSpecSource",
-    ].includes(name) || ["widthCm", "depthCm"].includes(name) &&
+        "lightWatts", "lightLumens", "beamAngleDeg", "lightSpecSource", "trackLengthCm",
+    ].includes(name) || ["widthCm", "depthCm", "outdoorWidthCm", "outdoorDepthCm"].includes(name) &&
         linkedProduct[name] != null)) {
         target.value = item[name] ?? "";
         setStatus("此欄位與物件資料庫連動；請到資料庫改價，或先在款式下拉解除連動。", "error");
@@ -3318,7 +3540,7 @@ function itemFieldChanged(target) {
         name === "installationUnitPrice" || name === "widthCm" ||
         name === "depthCm" || name === "heightCm" ||
         name === "outdoorWidthCm" || name === "outdoorDepthCm" ||
-        name === "trackLengthM" ||
+        name === "trackLengthM" || name === "trackLengthCm" ||
         name === "spotlightQuantity" || name === "spotlightUnitPrice" ||
         name === "fixtureUnitPrice" || name === "lightWatts" ||
         name === "lightLumens" || name === "beamAngleDeg") {
@@ -3330,21 +3552,24 @@ function itemFieldChanged(target) {
         const trackLength = name === "trackLengthM" || name === "quantity" && isSlideTrack(item);
         const spotCount = name === "spotlightQuantity";
         const lightNumber = ["lightWatts", "lightLumens", "beamAngleDeg"].includes(name);
+        const railLength = name === "trackLengthCm";
         const lightMinimum = name === "lightWatts" ? .1 : 1;
         const lightMaximum = name === "lightWatts" ? 1000 :
             name === "lightLumens" ? 200000 : 180;
         if (!target.checkValidity() ||
             (value && (!Number.isFinite(Number(value)) ||
-                Number(value) < (dimension ? 0.1 : lightNumber ? lightMinimum :
+                Number(value) < (railLength ? 1 : dimension ? 0.1 : lightNumber ? lightMinimum :
                     trackLength ? 0.01 : 0) ||
+                railLength && Number(value) > 3000 ||
                 lightNumber && Number(value) > lightMaximum ||
                 spotCount && (!Number.isSafeInteger(Number(value)) || Number(value) > 12))) ||
-            spotCount && value === "") {
+            (spotCount || railLength) && value === "") {
             invalidInputs.add(key);
             dirty = true;
             clearTimeout(saveTimer);
             setStatus(outdoorDimension
                 ? "室外機機身長邊須為 30–250cm、短邊須為 15–150cm，不可留白；目前尚未儲存。" :
+                railLength ? "單條軌道長度須為 1–3000cm，不能留白；目前尚未儲存。" :
                 dimension ? "物件尺寸必須大於 0 cm；目前尚未儲存。" :
                 lightNumber ? "燈具瓦數、流明或光束角須在標示範圍，或留白待查；目前尚未儲存。" :
                 trackLength ? "軌道長度必須在 0.01 至 100 米之間；目前尚未儲存。" :
@@ -3354,8 +3579,17 @@ function itemFieldChanged(target) {
             return;
         }
         invalidInputs.delete(key);
+        const previousTrackLengthCm = item.trackLengthCm;
         item[name] = value === "" ? null : Number(value);
-        if (isDownlight(item) &&
+        if (isTrackLighting(item) && name === "trackLengthCm" &&
+            previousTrackLengthCm !== item.trackLengthCm) {
+            setLightChoiceToCustom(item, "trackSelection");
+            updateVisibleItemField(item, "brandModel",
+                `軌道 ${item.trackLengthCm}cm（型號待填）`);
+            updateVisibleItemField(item, "unitPrice", null);
+            updateVisibleItemField(item, "priceSource",
+                "手動調整軌道長度，型號、接頭相容性與實際軌道單價待重新報價");
+        } else if (isDownlight(item) &&
             (name === "fixtureUnitPrice" || name === "installationUnitPrice")) {
             if (name === "fixtureUnitPrice" && item.lightSelection !== "custom") {
                 setLightChoiceToCustom(item, "lightSelection");
@@ -3480,7 +3714,7 @@ function itemFieldChanged(target) {
     }
     if (name === "quantity" || name === "unitPrice" ||
         name === "installationUnitPrice" || name === "priceCurrency" ||
-        name === "trackLengthM" || name === "spotlightQuantity" ||
+        name === "trackLengthM" || name === "trackLengthCm" || name === "spotlightQuantity" ||
         name === "spotlightUnitPrice" || name === "fixtureUnitPrice") renderTotals();
 }
 
@@ -3677,6 +3911,7 @@ function changeTrackLightSelection(target) {
     item[target.dataset.field] = target.value;
     if (rail) {
         item.brandModel = option.model;
+        item.trackLengthCm = option.trackLengthCm ?? item.trackLengthCm;
         item.unitPrice = option.unitPrice;
         item.priceSource = selectedLightPriceSource(item, option.source);
     } else {
@@ -3790,7 +4025,7 @@ content.addEventListener("change", (event) => {
             pendingProduct.unit = productUnit(productType.value);
             if (productType.value !== "equipment" &&
                 pendingProduct.environment === "any" ||
-                ["recessed", "track"].includes(productType.value) &&
+                ["recessed", "track", "split-ac", "window-ac"].includes(productType.value) &&
                     pendingProduct.environment === "balcony") {
                 pendingProduct.environment = "indoor";
             }
@@ -3936,7 +4171,7 @@ content.addEventListener("change", (event) => {
         setStatus("此物件的選款與資料庫連動；請使用「物件資料庫款式」下拉切換。", "error");
         return;
     }
-    if (target.dataset.field === "spotlightQuantity" ||
+    if (["spotlightQuantity", "trackLengthCm", "widthCm", "depthCm"].includes(target.dataset.field) ||
         ["outdoorWidthCm", "outdoorDepthCm"].includes(target.dataset.field)) {
         if (!invalidInputs.size) {
             if (view === "plan") renderPlanChange();

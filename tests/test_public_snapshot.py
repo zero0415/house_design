@@ -34,13 +34,16 @@ class PublicSnapshotTests(unittest.TestCase):
     def test_public_docs_match_derived_sample(self):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         quote = QUOTE.read_text(encoding="utf-8")
-        for value in ("51", "9", "7", "27,000", "51,500", "2,107,948",
+        for value in ("51", "9", "7", "27,000", "51,500", "2,345,496.20",
                       "16,000", "10 筆", "NT$0", "7,186", "14,994", "3,960",
-                      "26,936", "NT$6,600", "NT$13,200", "1,215"):
+                      "26,936", "NT$6,600", "NT$13,200", "1,215",
+                      "140,088", "21,032", "GPR-23HI", "4 坪內",
+                      "4,684", "967.20", "42,500", "237,548.20",
+                      "59.8", "55", "B06", "5.9cm"):
             with self.subTest(value=value):
                 self.assertIn(value, readme)
                 self.assertIn(value, quote)
-        self.assertIn("179 個物件與 18 款商品", readme)
+        self.assertIn("179 個物件與 28 款商品", readme)
         self.assertIn("沒有發布原始工程／電源配置 PDF", readme)
         self.assertIn("廚房附件", readme)
         self.assertIn("不自動移入屋內", readme)
@@ -49,13 +52,18 @@ class PublicSnapshotTests(unittest.TestCase):
         self.assertIn("安裝費來源", quote)
         self.assertIn("返回全屋格局", readme)
         self.assertIn("切換房間", quote)
+        self.assertIn("預設收合", readme)
+        self.assertIn("預設收合", quote)
         for value in ("www.trplus.com.tw/p/016095417",
                       "www.trplus.com.tw/p/026036388", "www.ovotoilet.com",
                       "三叉管是否內含未獲確認", "¥79,200", "¥8,600",
                       "不換算台幣", "不虛構 lux"):
             with self.subTest(value=value):
                 self.assertIn(value, readme)
-        self.assertIn("九盞既有吸頂燈**仍全數待選", quote)
+        self.assertIn("八盞室內**既有燈位", quote)
+        self.assertIn("臥室2室外位置／區域 ID 為 `null`", quote)
+        self.assertIn("60cm 檯面**模組外幅不是淨開口", quote)
+        self.assertIn("鏡櫃另待選", quote)
 
     def test_sample_is_deidentified_without_losing_the_plan(self):
         state = json.loads(SAMPLE.read_text(encoding="utf-8"))
@@ -65,10 +73,10 @@ class PublicSnapshotTests(unittest.TestCase):
         self.assertEqual((state["version"], state["revision"], state["undo"]), (5, 0, None))
         self.assertEqual(state["updatedAt"], "2026-01-01T00:00:00.000Z")
         self.assertEqual((len(state["rooms"]), len(state["items"]), len(state["products"])),
-                         (13, 179, 18))
+                         (13, 179, 28))
         rooms = {room["id"] for room in state["rooms"]}
         products = {product["id"] for product in state["products"]}
-        self.assertEqual(len(products), 18)
+        self.assertEqual(len(products), 28)
         self.assertEqual(len({item["id"] for item in state["items"]}), 179)
         self.assertEqual({room["name"] for room in state["rooms"] if room["id"].startswith(
             "bedroom-")}, {"臥室1", "臥室2", "臥室3"})
@@ -80,6 +88,8 @@ class PublicSnapshotTests(unittest.TestCase):
         self.assertTrue({f"product-kitchen-plan-{key}" for key in
                          ("sink", "faucet", "hood", "hot-water")} <= products)
         self.assertIn("catalog-ceiling-trplus-026036388", products)
+        self.assertTrue({f"sample-product-{index}" for index in range(19, 29)}
+                        <= products)
         self.assertEqual(next(item for item in state["items"] if item["id"] ==
                               "sample-balcony-outlet-01")["outletPlanPointId"], "R48")
         self.assertFalse(any(re.fullmatch(
@@ -186,7 +196,7 @@ class PublicSnapshotTests(unittest.TestCase):
             self.assertIn("不換算台幣", items[item_id]["note"])
             self.assertIn("業務可能無法取得海外庫存", items[item_id]["note"])
 
-    def test_ceiling_catalog_is_only_an_unselected_watt_reference(self):
+    def test_ceiling_catalog_links_eight_indoor_and_one_balcony_light(self):
         state = json.loads(SAMPLE.read_text(encoding="utf-8"))
         catalog = next(product for product in state["products"] if product["id"] ==
                        "catalog-ceiling-trplus-026036388")
@@ -202,15 +212,108 @@ class PublicSnapshotTests(unittest.TestCase):
                      "陽台防潮等級未核", "50W", "流明", "光束角", "IES",
                      "不得虛構 lux"):
             self.assertIn(term, catalog["note"])
-        self.assertFalse(any(item["productId"] == catalog["id"] for item in
-                             state["items"]))
         ceilings = [item for item in state["items"] if item["lightType"] == "ceiling"]
         self.assertEqual(len(ceilings), 9)
-        self.assertTrue(all(item["unitPrice"] is None and item["productId"] is None and
+        indoor = [item for item in ceilings if item["roomId"] != "balcony"]
+        self.assertEqual(len(indoor), 8)
+        self.assertTrue(all(item["unitPrice"] == 1215 and
+                            item["productId"] == catalog["id"] and
                             item["installationUnitPrice"] == 1200 and
-                            item["lightSelection"] == ("outdoor-pending" if item["roomId"]
-                                                       == "balcony" else "pending")
-                            for item in ceilings))
+                            item["lightSelection"] == "custom" and
+                            item["lightWatts"] == 50 and
+                            item["lightSpecSource"] == "" and
+                            item["lightLumens"] is None and
+                            item["beamAngleDeg"] is None for item in indoor))
+        balcony = next(item for item in ceilings if item["roomId"] == "balcony")
+        self.assertEqual((balcony["productId"], balcony["unitPrice"],
+                          balcony["installationUnitPrice"], balcony["lightWatts"],
+                          balcony["lightSelection"], balcony["lightSpecSource"]),
+                         ("sample-product-23", 286, 1200, 16, "outdoor-custom", ""))
+        self.assertEqual(next(product for product in state["products"] if
+                              product["id"] == "sample-product-23")["environment"], "balcony")
+        self.assertIn("防護等級", balcony["note"])
+
+    def test_conditional_catalog_and_preserved_public_geometry(self):
+        state = json.loads(SAMPLE.read_text(encoding="utf-8"))
+        items = {item["id"]: item for item in state["items"]}
+        products = {product["id"]: product for product in state["products"]}
+        rail = items["corridor-track-lighting"]
+        rail_product = products["sample-product-19"]
+        self.assertEqual((rail["trackLengthCm"], rail["spotlightQuantity"],
+                          rail["unitPrice"], rail["spotlightUnitPrice"],
+                          rail["installationUnitPrice"], rail["productId"],
+                          rail["placement"]["y"]),
+                         (300, 4, 340, 786, 1200, "sample-product-19", .5))
+        self.assertEqual((rail_product["trackLengthCm"],
+                          rail_product["lightWatts"],
+                          products["sample-product-20"]["lightWatts"],
+                          products["sample-product-20"]["spotlightUnitPrice"]),
+                         (300, 30, 40, 979))
+        self.assertFalse(any(item["productId"] == "sample-product-20"
+                             for item in items.values()))
+        acs = [item for item in items.values() if item["id"].startswith("ac-")]
+        self.assertEqual((len(acs), sum(item["productId"] == "sample-product-21"
+                                       for item in acs), sum(item["productId"] ==
+                                       "sample-product-28" for item in acs)), (6, 2, 4))
+        self.assertTrue(all(item["acPlanStatus"] == "active" for item in acs))
+        for room_id, product_id, price, size in (
+                ("master", "sample-product-21", 27980, (95.5, 34.5)),
+                ("living-dining", "sample-product-21", 27980, (95.5, 34.5)),
+                *((room, "sample-product-28", 21032, (73.2, 33))
+                  for room in ("bedroom-1", "bedroom-2", "bedroom-3", "studio"))):
+            item = items[f"ac-{room_id}"]
+            self.assertEqual((item["productId"], item["unitPrice"],
+                              (item["outdoorWidthCm"], item["outdoorDepthCm"])),
+                             (product_id, price, size))
+            if product_id == "sample-product-28":
+                self.assertIn("29.6", item["note"])
+                self.assertNotIn("嚴重過大容量", item["note"])
+        self.assertEqual((items["ac-bedroom-2"]["outdoorPlacement"],
+                          items["ac-bedroom-2"]["outdoorZoneId"]), (None, None))
+        self.assertEqual(products["sample-product-22"]["unitPrice"], 16999)
+        self.assertEqual((products["sample-product-28"]["unitPrice"],
+                          products["sample-product-28"]["widthCm"],
+                          products["sample-product-28"]["heightCm"],
+                          products["sample-product-28"]["depthCm"],
+                          products["sample-product-28"]["outdoorWidthCm"],
+                          products["sample-product-28"]["outdoorHeightCm"],
+                          products["sample-product-28"]["outdoorDepthCm"]),
+                         (21032, 82.5, None, 19.6, 73.2, 55.5, 33))
+        self.assertFalse(any(item["productId"] == "sample-product-22"
+                             for item in items.values()))
+        self.assertEqual((items["bath-guest-vanity"]["widthCm"],
+                          items["bath-guest-vanity"]["depthCm"],
+                          items["bath-main-vanity"]["widthCm"],
+                          items["bath-main-vanity"]["depthCm"]), (60, 35, 60, 35))
+        self.assertTrue(all(items[f"{room}-vanity"]["installationUnitPrice"] == 0
+                            for room in ("bath-main", "bath-guest")))
+        self.assertEqual((items["bath-guest-tub-grab-bar"]["unitPrice"],
+                          items["bath-guest-tub-grab-bar"]["installationUnitPrice"],
+                          items["bath-guest-tub-grab-bar"]["productId"]),
+                         (967.2, None, "sample-product-24"))
+        for item_id, product_id, price, width, depth in (
+                ("balcony-washer", "sample-product-25", 21150, 70.5, 68.6),
+                ("balcony-dryer", "sample-product-26", 20599, 73.7, 72.1),
+                ("kitchen-plan-dishwasher", "sample-product-27", 42500, 59.8, 55)):
+            with self.subTest(item=item_id):
+                item = items[item_id]
+                self.assertEqual((item["productId"], item["unitPrice"], item["widthCm"],
+                                  item["depthCm"], item["installationUnitPrice"]),
+                                 (product_id, price, width, depth, None))
+                self.assertEqual(products[product_id]["unitPrice"], price)
+        self.assertIn("瓦斯", items["balcony-dryer"]["note"])
+        self.assertIn("嚴禁據圖施工", items["balcony-dryer"]["note"])
+        self.assertIn("淨開口", items["kitchen-plan-dishwasher"]["note"])
+        self.assertIn("基本運送", items["kitchen-plan-dishwasher"]["note"])
+        b06 = next(item for item in items.values()
+                   if item.get("outletPlanPointId") == "B06")
+        circuit = items["circuit-pdf-outlet-B06"]
+        self.assertEqual(circuit["circuitOutletId"], b06["id"])
+        for item in (b06, circuit):
+            self.assertIn("110V／15A／1100W", item["note"])
+            self.assertIn("不代表現場插孔", item["note"])
+        self.assertEqual(sum(item["productId"] == "sample-product-27"
+                             for item in items.values()), 1)
 
     def test_derived_electrical_endpoints_and_safety_warnings(self):
         items = json.loads(SAMPLE.read_text(encoding="utf-8"))["items"]
@@ -256,6 +359,8 @@ class PublicSnapshotTests(unittest.TestCase):
         self.assertIsNone(kitchen["kitchen-plan-undermount-labor"]["placement"])
         prices = {"sink": 4700, "faucet": 3000, "hood": 6400, "hot-water": 35900}
         self.assertEqual(sum(prices.values()) + 1500, 51_500)
+        self.assertEqual(sum(prices.values()) + 1500 +
+                         kitchen["kitchen-plan-dishwasher"]["unitPrice"], 94_000)
         products = {product["id"]: product for product in state["products"]}
         for key, price in prices.items():
             item = kitchen[f"kitchen-plan-{key}"]
@@ -263,8 +368,11 @@ class PublicSnapshotTests(unittest.TestCase):
             self.assertEqual(item["productId"], f"product-kitchen-plan-{key}")
             self.assertEqual(products[item["productId"]]["unitPrice"], price)
         for key in ("prep", "sink-base", "cooktop-base", "tower", "return",
-                    "dishwasher", "ih", "gas"):
+                    "ih", "gas"):
             self.assertIsNone(kitchen[f"kitchen-plan-{key}"]["unitPrice"])
+        self.assertEqual((kitchen["kitchen-plan-dishwasher"]["unitPrice"],
+                          kitchen["kitchen-plan-dishwasher"]["productId"]),
+                         (42500, "sample-product-27"))
         self.assertEqual((kitchen["kitchen-plan-prep"]["widthCm"],
                           kitchen["kitchen-plan-sink-base"]["widthCm"],
                           kitchen["kitchen-plan-cooktop-base"]["widthCm"]), (60, 76, 80))
@@ -289,8 +397,12 @@ class PublicSnapshotTests(unittest.TestCase):
         self.assertIn("assets/floorplan.js", {entry["path"] for entry in bundle["modules"]})
         self.assertIn("assets/survey.js", {entry["path"] for entry in bundle["modules"]})
         for name in ("kitchen-plan.js", "kitchen-icons.js", "outlet-diagram.js",
-                     "bathroom-installation.js"):
+                     "bathroom-installation.js", "laundry-notes.js",
+                     "quote-provenance.js"):
             self.assertIn(f"assets/{name}", {entry["path"] for entry in bundle["modules"]})
+        for name in ("corridor-plan.js", "air-conditioning-plan.js"):
+            self.assertTrue((ROOT / "extensions" / "renovation-equipment" / "assets" /
+                             name).is_file())
         self.assertIn("state-browser.mjs", {entry["path"] for entry in bundle["modules"]})
         self.assertNotRegex(html, r"(?i)<\s*(?:img|image)\b|data:image/|base64,")
         self.assertNotRegex(html, r'(?i)<script[^>]+src=|<link[^>]+rel="stylesheet"')

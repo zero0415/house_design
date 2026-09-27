@@ -1,11 +1,16 @@
-import { isSplitAirConditioner } from "./ac-outdoors.js";
+import { AC_ROOM_IDS, isSplitAirConditioner, OUTDOOR_AC_SIZE_BOUNDS_CM } from "./ac-outdoors.js";
 import { isQuotedEquipment } from "./budget.js";
 import { customEquipment, CUSTOM_PRODUCT_TYPES } from "./equipment-catalog.js";
 import { installedDownlightUnitPrice } from "./lighting-options.js";
 import { isDedicatedCircuit } from "./socket-plan.js";
 import { SWITCH_TYPES } from "./switch-options.js";
+import { trackLengthCm } from "./track-lighting.js";
 
-export const PRODUCT_TYPES = CUSTOM_PRODUCT_TYPES;
+export const PRODUCT_TYPES = Object.freeze({
+    ...CUSTOM_PRODUCT_TYPES,
+    "split-ac": "分離式冷氣（既有室內外一套換款）",
+    "window-ac": "窗型冷氣（僅候選，不可直接放置）",
+});
 
 export const PRODUCT_ENVIRONMENTS = Object.freeze({
     indoor: "室內",
@@ -14,6 +19,7 @@ export const PRODUCT_ENVIRONMENTS = Object.freeze({
 });
 
 export function productUnit(type) {
+    if (type === "split-ac" || type === "window-ac") return "台";
     if (type === "ceiling") return "盞";
     if (type === "track" || type === "dedicated-circuit") return "條";
     if (type === "equipment") return "組";
@@ -44,7 +50,7 @@ export function productFromDraft(draft, id) {
     if (!Object.hasOwn(PRODUCT_TYPES, type) ||
         !Object.hasOwn(PRODUCT_ENVIRONMENTS, environment) ||
         environment === "any" && type !== "equipment" ||
-        environment === "balcony" && ["recessed", "track"].includes(type)) {
+        environment === "balcony" && ["recessed", "track", "split-ac", "window-ac"].includes(type)) {
         throw new RangeError("請選擇適用的商品類型和室內／陽台環境。");
     }
     const name = draft.name?.trim() ?? "";
@@ -77,6 +83,14 @@ export function productFromDraft(draft, id) {
         throw new RangeError("燈具光學資料來源至多 450 字元。");
     }
     const spotlights = type === "track";
+    const split = type === "split-ac";
+    const outdoorWidthCm = split ? opticalNumber(draft.outdoorWidthCm, "室外機寬度",
+        OUTDOOR_AC_SIZE_BOUNDS_CM.minWidth, OUTDOOR_AC_SIZE_BOUNDS_CM.maxWidth) : null;
+    const outdoorDepthCm = split ? opticalNumber(draft.outdoorDepthCm, "室外機深度",
+        OUTDOOR_AC_SIZE_BOUNDS_CM.minDepth, OUTDOOR_AC_SIZE_BOUNDS_CM.maxDepth) : null;
+    if (split && (outdoorWidthCm === null || outdoorDepthCm === null)) {
+        throw new RangeError("分離式商品須填室外機寬深，才能連動既有成套冷氣。");
+    }
     const spotlightQuantity = spotlights ? Number(draft.spotlightQuantity) : null;
     const spotlightModel = spotlights ? draft.spotlightModel?.trim() ?? "" : null;
     if (spotlights && (!Number.isSafeInteger(spotlightQuantity) ||
@@ -90,11 +104,19 @@ export function productFromDraft(draft, id) {
         unitPrice: draftNumber(draft.unitPrice, "商品單價"),
         installationUnitPrice: installation
             ? draftNumber(draft.installationUnitPrice, "安裝單價") : null,
-        widthCm: type === "equipment"
+        widthCm: type === "equipment" || split
             ? draftNumber(draft.widthCm, "商品寬度", { positive: true }) : null,
-        depthCm: type === "equipment"
+        depthCm: type === "equipment" || split
             ? draftNumber(draft.depthCm, "商品深度", { positive: true }) : null,
         spotlightModel,
+        ...(split ? {
+            heightCm: draftNumber(draft.heightCm, "室內機高度", { positive: true }),
+            outdoorWidthCm, outdoorDepthCm,
+            outdoorHeightCm: draftNumber(draft.outdoorHeightCm, "室外機高度", { positive: true }),
+        } : {}),
+        ...(spotlights ? { trackLengthCm: trackLengthCm(
+            draft.trackLengthCm == null || String(draft.trackLengthCm).trim() === ""
+                ? undefined : Number(draft.trackLengthCm)) } : {}),
         spotlightQuantity,
         spotlightUnitPrice: spotlights
             ? draftNumber(draft.spotlightUnitPrice, "軌道燈單價") : null,
@@ -109,7 +131,9 @@ export function productFromDraft(draft, id) {
 }
 
 export function productAllowedInRoom(product, roomId) {
-    if (!product || !Object.hasOwn(CUSTOM_PRODUCT_TYPES, product.type)) return false;
+    if (!product || !Object.hasOwn(PRODUCT_TYPES, product.type)) return false;
+    if (product.type === "window-ac") return false;
+    if (product.type === "split-ac") return product.environment === "indoor" && AC_ROOM_IDS.includes(roomId);
     if (product.environment === "any") return product.type === "equipment";
     if (product.environment === "balcony") return roomId === "balcony";
     return product.environment === "indoor" &&
@@ -117,7 +141,8 @@ export function productAllowedInRoom(product, roomId) {
 }
 
 export function productTypeForItem(item) {
-    if (!item || item.kind === "door" || isSplitAirConditioner(item)) return null;
+    if (!item || item.kind === "door") return null;
+    if (isSplitAirConditioner(item)) return item.acPlanStatus === "excluded" ? null : "split-ac";
     if (isDedicatedCircuit(item)) {
         return isQuotedEquipment(item) ? null : "dedicated-circuit";
     }
@@ -175,7 +200,10 @@ export function applyProductToItem(product, item) {
         next.beamAngleDeg = product.beamAngleDeg;
         next.lightSpecSource = product.lightSpecSource;
     }
-    if (product.type === "equipment") {
+    if (product.type === "split-ac") {
+        next.outdoorWidthCm = product.outdoorWidthCm;
+        next.outdoorDepthCm = product.outdoorDepthCm;
+    } else if (product.type === "equipment") {
         if (product.widthCm != null) next.widthCm = product.widthCm;
         if (product.depthCm != null) next.depthCm = product.depthCm;
     } else if (product.type.startsWith("switch-")) {
@@ -201,7 +229,7 @@ export function applyProductToItem(product, item) {
     } else if (product.type === "track") {
         next.trackSelection = "custom";
         next.spotlightSelection = "custom";
-        next.trackLengthCm = 150;
+        next.trackLengthCm = trackLengthCm(product.trackLengthCm);
         next.spotlightQuantity = product.spotlightQuantity;
         next.spotlightModel = product.spotlightModel;
         next.spotlightUnitPrice = product.spotlightUnitPrice;
@@ -212,6 +240,9 @@ export function applyProductToItem(product, item) {
 }
 
 export function equipmentFromProduct(product, roomId, id) {
+    if (product.type === "split-ac" || product.type === "window-ac") {
+        throw new RangeError("冷氣商品不可另建假機位；分離式僅能替既有成套冷氣換款，窗型候選須另行核定對外開口。");
+    }
     if (!productAllowedInRoom(product, roomId)) {
         throw new RangeError("這款商品不適用於選定房間；請確認防潮或鐵窗施工條件。");
     }
@@ -227,6 +258,7 @@ export function equipmentFromProduct(product, roomId, id) {
         installationPrice: product.installationUnitPrice ?? "",
         spotlightModel: product.spotlightModel ?? "",
         spotlightPrice: product.spotlightUnitPrice ?? "",
+        trackLengthCm: product.trackLengthCm,
         lightWatts: product.lightWatts ?? "",
         lightLumens: product.lightLumens ?? "",
         beamAngleDeg: product.beamAngleDeg ?? "",
@@ -242,7 +274,9 @@ export function linkedProductMismatch(product, item) {
     const fields = [
         "brandModel", "unit", "unitPrice", "priceCurrency", "priceSource",
     ];
-    if (product.type === "equipment") {
+    if (product.type === "split-ac") {
+        fields.push("outdoorWidthCm", "outdoorDepthCm");
+    } else if (product.type === "equipment") {
         if (product.widthCm != null) fields.push("widthCm");
         if (product.depthCm != null) fields.push("depthCm");
     } else if (product.type.startsWith("switch-")) {

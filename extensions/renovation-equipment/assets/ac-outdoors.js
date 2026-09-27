@@ -104,6 +104,29 @@ export function isActiveSplitAirConditioner(item) {
     return isSplitAirConditioner(item) && item.acPlanStatus !== "excluded";
 }
 
+export const AC_NO_OUTDOOR_WARNING =
+    "無可確認對外窗／室外機位／冷媒管穿越、排水、供電、法規，非可施工配置。" +
+    "室內隔間預留孔不等於已確認的對外排熱或冷媒管路；未建立室外機標記或新增供電迴路。";
+
+export function airConditioningWarnings(item) {
+    if (!isActiveSplitAirConditioner(item)) return [];
+    const warnings = [];
+    if (!item.outdoorPlacement) warnings.push(AC_NO_OUTDOOR_WARNING);
+    if (/RB-S51HG1/.test(item.brandModel ?? "")) {
+        const small = item.roomId === "bedroom-2" ? "約2坪" :
+            ["bedroom-1", "bedroom-3", "studio"].includes(item.roomId) ? "約3坪" : null;
+        if (small) warnings.push(`${small}小房使用5.1kW有嚴重過大容量風險，` +
+            "除濕、短循環與實際熱負載須專業評估。");
+        if (item.roomId === "master") warnings.push(
+            "主臥約6.38坪，低於CHIMEI賣場的8–10／8–11坪參考區間；" +
+            "不保證除濕、短循環與舒適度，須依實際熱負載選型。");
+        if (item.roomId === "living-dining") warnings.push(
+            "客餐廳約10.68坪，介於CHIMEI商品標題8–10坪與內文8–11坪的不一致區間；" +
+            "日照、連通空間與空調負載須另核，不能以賣場坪數保證冷房能力。");
+    }
+    return warnings;
+}
+
 export function outdoorACPosition(item) {
     if (!isSplitAirConditioner(item)) {
         throw new TypeError("只能對已規劃的分離式冷氣讀取室外機位置。");
