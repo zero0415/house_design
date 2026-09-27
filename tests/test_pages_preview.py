@@ -150,6 +150,41 @@ class PagesPreviewTests(unittest.TestCase):
             timeout=15000,
         )
 
+    def assert_balcony_sheet_context(self, page, current):
+        contexts = page.locator("[data-sheet-context]")
+        self.assertEqual(contexts.count(), 3 if current else 2)
+        self.assertEqual(contexts.evaluate_all("""nodes =>
+            Object.fromEntries(nodes.map(node =>
+                [node.dataset.sheetContext, node.dataset.contextRoom]))
+        """), {
+            "balcony-dryer": "balcony" if current else "ac-platform",
+            "balcony-washer": "balcony",
+            **({"balcony-outboard-sink": "ac-platform"} if current else {}),
+        })
+        self.assertEqual(page.locator(
+            ".sheet-scroll .fixed-balcony-sink").count(), 1)
+        self.assertEqual(page.locator(
+            ".sheet-scroll .historical-proposed-sink").count(), int(current))
+        self.assertEqual(page.locator(
+            ".sheet-scroll .sink-bowl").count(), int(not current))
+        self.assertEqual(page.locator(
+            '.sheet-scroll [data-demolition-status="proposed"]').count(),
+            int(current))
+        self.assertIn("存檔暫估占地", contexts.first.get_attribute("aria-label"))
+        self.assertIn("原水槽擬拆" if current else "原水槽仍為現況",
+                      page.locator('[data-sheet-laundry-warning]').inner_text())
+        self.assertEqual(page.locator(
+            ".sheet-scroll img, .sheet-scroll image, "
+            ".sheet-scroll foreignObject, .sheet-control-relation, "
+            ".control-editor").count(), 0)
+        if current:
+            self.assertIn("獨立支撐", page.locator(
+                '[data-sheet-context="balcony-outboard-sink"]')
+                .get_attribute("aria-label"))
+        else:
+            self.assertEqual(page.locator(
+                '[data-sheet-context="balcony-outboard-sink"]').count(), 0)
+
     def test_demo_import_is_transient_and_edits_survive_reload(self):
         context = self.browser.new_context()
         try:
@@ -320,6 +355,10 @@ class PagesPreviewTests(unittest.TestCase):
                     "document.querySelector('#overall-total').textContent.includes('2,318,560')",
                     timeout=15000,
                 )
+                for tab_name in ("插座配置圖", "燈具配置圖"):
+                    page.get_by_role("tab", name=tab_name, exact=True).click()
+                    self.assert_balcony_sheet_context(page, True)
+                page.get_by_role("tab", name="格局圖", exact=True).click()
                 page.locator('.overview-svg .plan-zone[data-select-room="balcony"]').click()
                 reference = page.locator(".balcony-reference")
                 self.assertTrue(reference.locator(
@@ -378,11 +417,16 @@ class PagesPreviewTests(unittest.TestCase):
                     !(await globalThis.__RENOVATION_OFFLINE_STORE__.read()).items
                         .some(item => item.id === 'balcony-outboard-sink')
                 """, timeout=15000)
+                page.get_by_role("tab", name="燈具配置圖", exact=True).click()
+                self.assertEqual(page.locator("[data-sheet-context]").count(), 2)
+                self.assertEqual(page.locator(
+                    ".sheet-scroll .historical-proposed-sink").count(), 1)
                 page.locator("#undo-last").click()
                 page.wait_for_function("""async () =>
                     (await globalThis.__RENOVATION_OFFLINE_STORE__.read()).items
                         .some(item => item.id === 'balcony-outboard-sink')
                 """, timeout=15000)
+                self.assert_balcony_sheet_context(page, True)
                 with page.expect_download() as download:
                     page.locator("#export-items").click()
                 rows = list(csv.DictReader(StringIO(
@@ -454,6 +498,7 @@ class PagesPreviewTests(unittest.TestCase):
                 ".electrical-sheet .fixed-balcony-sink").count(), 1)
             self.assertEqual(page.locator(
                 '.electrical-sheet [data-demolition-status="proposed"]').count(), 1)
+            self.assert_balcony_sheet_context(page, True)
             self.assertIn("衝突", page.locator(
                 '[data-sheet-point="R33"]').get_attribute("aria-label"))
             warnings = page.locator(".sheet-warnings")
@@ -481,12 +526,13 @@ class PagesPreviewTests(unittest.TestCase):
             self.assertEqual(page.locator("[data-sheet-light]").count(), 16)
             self.assertEqual(page.locator("[data-light-head]").count(), 19)
             self.assertEqual(page.locator("[data-sheet-switch]").count(), 14)
+            self.assert_balcony_sheet_context(page, True)
             self.assertIn("移除開關 2", page.locator(
                 ".electrical-sheet").inner_text())
             self.assertIn("控制對象未核", page.locator(
-                ".sheet-caution").inner_text())
+                ".sheet-caution").first.inner_text())
             self.assertIn("W 不能推算照度", page.locator(
-                ".sheet-caution").inner_text())
+                ".sheet-caution").first.inner_text())
             self.assertEqual(page.locator(
                 ".electrical-sheet [data-preview-switch-id], "
                 ".electrical-sheet [data-preview-light-id], "
@@ -534,6 +580,22 @@ class PagesPreviewTests(unittest.TestCase):
             scroll.evaluate("node => {node.scrollLeft = 400; node.scrollTop = 1500}")
             self.assertTrue(scroll.evaluate(
                 "node => node.scrollLeft > 0 && node.scrollTop > 0"))
+            scroll.evaluate(
+                "node => { node.scrollLeft = 580; node.scrollTop = 1446; }")
+            ghost_label = page.locator(
+                ".sheet-scroll .historical-proposed-sink text"
+            )
+            self.assertEqual(ghost_label.text_content(),
+                             "原水槽擬拆")
+            self.assertGreaterEqual(ghost_label.evaluate(
+                "node => parseFloat(getComputedStyle(node).fontSize)"), 13)
+            ghost_rect = ghost_label.bounding_box()
+            scroll_rect = scroll.bounding_box()
+            self.assertGreaterEqual(ghost_rect["x"], scroll_rect["x"])
+            self.assertLessEqual(
+                ghost_rect["x"] + ghost_rect["width"],
+                scroll_rect["x"] + scroll_rect["width"],
+            )
             sheet_width = page.evaluate("document.documentElement.scrollWidth")
             lighting.focus()
             page.keyboard.press("Home")
@@ -608,10 +670,12 @@ class PagesPreviewTests(unittest.TestCase):
                 self.assertEqual(page.locator("[data-sheet-point]").count(), 67)
                 self.assertEqual(page.locator(
                     '.electrical-sheet [data-demolition-status="proposed"]').count(), 0)
+                self.assert_balcony_sheet_context(page, False)
                 page.get_by_role("tab", name="燈具配置圖", exact=True).click()
                 self.assertEqual(page.locator("[data-sheet-light]").count(), 16)
                 self.assertEqual(page.locator("[data-light-head]").count(), 19)
                 self.assertEqual(page.locator("[data-sheet-switch]").count(), 14)
+                self.assert_balcony_sheet_context(page, False)
                 self.assertEqual(page.evaluate(
                     "globalThis.__RENOVATION_OFFLINE_STORE__.read()"), imported)
                 self.assertEqual(page.locator(".budget").inner_text(), budget)
@@ -641,6 +705,7 @@ class PagesPreviewTests(unittest.TestCase):
                 )
                 self.assertEqual(page.locator("[data-sheet-light]").count(), 16)
                 self.assertEqual(page.locator(".budget").inner_text(), budget)
+                self.assert_balcony_sheet_context(page, False)
                 self.assertEqual(requests, [])
                 self.assertEqual(errors, [])
             finally:

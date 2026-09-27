@@ -46,6 +46,75 @@ test("exact saved R/B/C endpoints appear once, not duplicated by circuits", () =
     assert.match(outlet, /專用迴路資料 9 筆（不另畫插座）/);
 });
 
+test("both sheets draw saved laundry positions and ghost only the tagged historical sink", () => {
+    const previous = structuredClone(state);
+    previous.items = previous.items.filter((item) =>
+        item.id !== "balcony-outboard-sink");
+    const oldDryer = previous.items.find((item) =>
+        item.id === "balcony-dryer");
+    oldDryer.roomId = "ac-platform";
+    oldDryer.orientation = 180;
+    oldDryer.placement = { x: .857, y: .5 };
+    const original = JSON.stringify(state);
+    for (const view of ["outlet-sheet", "lighting-sheet"]) {
+        const current = renderElectricalSheet(state, view);
+        const old = renderElectricalSheet(previous, view);
+        for (const id of ["balcony-dryer", "balcony-washer",
+            "balcony-outboard-sink"]) {
+            const item = state.items.find((entry) => entry.id === id);
+            const room = state.rooms.find((entry) => entry.id === item.roomId);
+            const { x, y } = markerPosition(item, roomGeometry(room));
+            assert.equal(matches(current, new RegExp(
+                `data-sheet-context="${id}"`, "g")).length, 1);
+            assert(current.includes(`data-context-room="${item.roomId}"
+            transform="translate(${x} ${y})"`));
+        }
+        assert.equal(matches(current, /historical-proposed-sink/g).length, 1);
+        assert.match(current, /原水槽擬拆.*尚未拆除/);
+        assert.equal(matches(current, />原水槽擬拆<\/text>/g).length, 1);
+        assert.match(current, /data-demolition-status="proposed"/);
+        assert.match(current, /非施工：烘衣機門口／燃氣／排氣/);
+        assert.doesNotMatch(current, /class="sink-bowl"/);
+        assert.match(current, /class="object-icon conditional-outboard-basin"/);
+        assert.equal(matches(old, /data-sheet-context=/g).length, 2);
+        const oldPosition = markerPosition(oldDryer,
+            roomGeometry(previous.rooms.find((room) =>
+                room.id === "ac-platform")));
+        assert(old.includes(`data-context-room="ac-platform"
+            transform="translate(${oldPosition.x} ${oldPosition.y})"`));
+        assert.match(old, /class="fixed-balcony-sink" role="img"/);
+        assert.match(old, /class="sink-bowl"/);
+        assert.match(old, /原水槽仍為現況/);
+        assert.doesNotMatch(old,
+            /data-sheet-context="balcony-outboard-sink"|historical-proposed-sink|data-demolition-status/);
+        assert(!/<(?:img|image|foreignObject|script)\b|data:image|file:/i.test(current));
+        assert(!/<(?:img|image|foreignObject|script)\b|data:image|file:/i.test(old));
+    }
+    assert.equal(JSON.stringify(state), original);
+    assert.equal(data.placedEndpoints.length, 67);
+    assert.equal(data.placedLights.length, 16);
+    assert.equal(data.activeSwitches.length, 14);
+});
+
+test("sheet context follows later user placements and never guesses a gas model", () => {
+    const edited = structuredClone(state);
+    const dryer = edited.items.find((item) => item.id === "balcony-dryer");
+    dryer.placement = { x: .2, y: .5 };
+    const position = markerPosition(dryer, roomGeometry(edited.rooms.find(
+        (room) => room.id === dryer.roomId)));
+    let html = renderElectricalSheet(edited, "outlet-sheet");
+    assert(html.includes(`data-context-room="balcony"
+            transform="translate(${position.x} ${position.y})"`));
+    dryer.brandModel = "";
+    dryer.productId = null;
+    dryer.note = "機型和供能未選，施工條件待核。";
+    html = renderElectricalSheet(edited, "lighting-sheet");
+    assert.match(html, /<text[^>]*>烘衣機（條件）<\/text>/);
+    assert.doesNotMatch(html, /瓦斯烘衣機（條件）/);
+    assert.match(html, /非施工：烘衣機門口／供能／排氣/);
+    assert.doesNotMatch(html, /historical-proposed-sink/);
+});
+
 test("light heads and active switches follow this public state, never private counts", () => {
     assert.equal(data.placedLights.length, 16);
     assert.equal(data.heads, 19);

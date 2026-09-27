@@ -79,6 +79,10 @@ class PublicSnapshotTests(unittest.TestCase):
                       "沒有複製或轉繪其頁面"):
             with self.subTest(utility=value):
                 self.assertIn(value, readme)
+        for value in ("原水槽擬拆", "刪線幽靈框", "179 筆",
+                      "不會憑空新增掛盆", "右側洗衣機"):
+            with self.subTest(balcony_sheet=value):
+                self.assertIn(value, readme)
 
     def test_sample_is_deidentified_without_losing_the_plan(self):
         state = json.loads(SAMPLE.read_text(encoding="utf-8"))

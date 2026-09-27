@@ -1847,3 +1847,22 @@ p { margin: 6px 0 10px; }
     .electrical-sheet { padding: 10px; }
     .tabs { flex-wrap: wrap; }
 }
+.sheet-scroll .historical-sink-outline {
+    fill: none; stroke: #8a7474; stroke-dasharray: 4 3; opacity: .5;
+}
+.sheet-scroll .historical-sink-strike {
+    stroke: #af2929; stroke-width: 2; opacity: .5;
+}
+.sheet-scroll .historical-proposed-sink text {
+    fill: #953434; paint-order: stroke; stroke: #fff;
+    stroke-width: 3; font-size: 13px; font-weight: 600;
+}
+.sheet-laundry-context {
+    color: #576673; stroke: #576673; fill: #f5f7f9; stroke-width: 1.5;
+}
+.sheet-laundry-context text {
+    fill: #394854; stroke: #fff; stroke-width: 3px;
+    paint-order: stroke; font-size: 13px;
+}
+.sheet-laundry-context .object-icon { opacity: .65; }
+.sheet-laundry-context:focus { outline: 3px solid #087cca; }

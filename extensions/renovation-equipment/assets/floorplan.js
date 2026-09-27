@@ -697,8 +697,19 @@ function renderBedroom2Partition(items, interactive = true) {
     </g>`;
 }
 
-function renderBalconySink() {
+function renderBalconySink(proposed = false) {
     const { x, y, width, height } = BALCONY_SINK;
+    if (proposed) {
+        return `<g class="fixed-balcony-sink historical-proposed-sink" role="img"
+            aria-label="原水槽擬拆；刪線幽靈框僅為歷史占地，尚未拆除或核可">
+            <title>原水槽擬拆；保留歷史現況，不是現有洗衣盆位置或已完成拆除</title>
+            <rect class="historical-sink-outline" x="${x}" y="${y}"
+                width="${width}" height="${height}"/>
+            <path class="historical-sink-strike"
+                d="M${x} ${y} L${x + width} ${y + height}"/>
+            <text x="${x + width + 10}" y="${y + height - 8}">原水槽擬拆</text>
+        </g>`;
+    }
     const centerX = x + width / 2;
     const centerY = y + height / 2;
     const oldX = centerX - height / 2;
@@ -719,14 +730,14 @@ function renderBalconySink() {
     </g>`;
 }
 
-function renderBalconyDemolition(items) {
+function renderBalconyDemolition(items, sheet = false) {
     if (!items.some(isConditionalFloorDryer)) return "";
     const { x, y, width, height } = BALCONY_SINK;
     return `<g class="balcony-demolition" data-demolition-status="proposed" role="img"
         aria-label="現況泥作水槽擬拆、須核價／許可；舊占地仍保留，尚未拆除">
         <title>條件式烘衣機重疊歷史水槽占地，不代表水槽已拆或取得施工許可</title>
         <rect x="${x}" y="${y}" width="${width}" height="${height}"/>
-        <text x="${x}" y="${y - 12}">現況水槽擬拆・須核價／許可</text>
+        ${sheet ? "" : `<text x="${x}" y="${y - 12}">現況水槽擬拆・須核價／許可</text>`}
     </g>`;
 }
 
@@ -1047,7 +1058,7 @@ function renderKitchenShortWingFill(items, geometry, scope) {
 
 export function renderOverviewPlan(rooms, items, showSource = false, activeLightIds = null,
     visibleLayers = DEFAULT_VISIBLE_LAYERS, focusedCircuitId = null,
-    planeHeightCm = 80, sheetMarker = null) {
+    planeHeightCm = 80, sheetMarker = null, sheetUnderlay = "") {
     const byRoom = new Map(rooms.map((room) => [room.id, room]));
     const renderedZones = HOUSE_ZONES.map((zone) => {
         const room = byRoom.get(zone.id);
@@ -1074,7 +1085,8 @@ export function renderOverviewPlan(rooms, items, showSource = false, activeLight
             ${renderWetDryDivider(zone.id, items)}
             ${visibleLayers.furniture
                 ? renderKitchenShortWingFill(roomItems, geometry, "overview") : ""}
-            ${zone.id === "balcony" && (visibleLayers.furniture || sheetMarker)
+            ${zone.id === "balcony" && (visibleLayers.furniture || sheetMarker) &&
+                !(sheetMarker && items.some(isConditionalFloorDryer))
                 ? renderBalconySink() : ""}
             ${zone.id === "ac-platform" ? renderExteriorPlatform(false, items) : ""}
             ${zone.id === "corridor"
@@ -1113,7 +1125,7 @@ export function renderOverviewPlan(rooms, items, showSource = false, activeLight
             <path class="plan-corridor-grid" d="${CORRIDOR_PATH}" fill="url(#plan-meter-grid)"/>`}
         ${renderedZones}
         ${(visibleLayers.furniture || sheetMarker) && byRoom.has("balcony") ?
-            renderBalconyDemolition(items) : ""}
+            renderBalconyDemolition(items, Boolean(sheetMarker)) : ""}
         ${byRoom.has("entry") && byRoom.has("living-dining")
             ? renderEntryLivingPassage(true, !sheetMarker) : ""}
         ${activeLightIds !== null && visibleLayers.switches && visibleLayers.lights
@@ -1125,10 +1137,13 @@ export function renderOverviewPlan(rooms, items, showSource = false, activeLight
             .map((door) => renderDoor(door, items, true, true, !sheetMarker)).join("")}
         ${windows.filter((window) => byRoom.has(window.roomId))
             .map((window) => renderWindow(window, true, !sheetMarker)).join("")}
-        ${sheetMarker ? rooms.filter((room) =>
-            HOUSE_ZONE_BY_ID.has(room.id)).map((room) =>
-            items.filter((item) => item.roomId === room.id).map((item) =>
-                sheetMarker(item, roomGeometry(room), room.name)).join("")).join("") : ""}
+        ${sheetMarker ? sheetUnderlay +
+            (byRoom.has("balcony") && items.some(isConditionalFloorDryer)
+                ? renderBalconySink(true) : "") +
+            rooms.filter((room) =>
+                HOUSE_ZONE_BY_ID.has(room.id)).map((room) =>
+                items.filter((item) => item.roomId === room.id).map((item) =>
+                    sheetMarker(item, roomGeometry(room), room.name)).join("")).join("") : ""}
         ${visibleLayers.furniture ? items.filter((item) => isActiveSplitAirConditioner(item) &&
             item.outdoorPlacement && byRoom.has(item.roomId))
             .map((item) => renderOutdoorAC(item, true)).join("") : ""}

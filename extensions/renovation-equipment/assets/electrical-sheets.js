@@ -4,6 +4,8 @@ import { diagramPointSymbol, OUTLET_POINT_WARNINGS } from "./outlet-diagram.js";
 import { isDedicatedCircuit, isSocket, isWeakCurrent } from "./socket-plan.js";
 import { isQuotedEquipment } from "./budget.js";
 import { trackLengthCm } from "./track-lighting.js";
+import { renderObjectIcon } from "./plan-icons.js";
+import { isConditionalFloorDryer, laundryMarkerNote } from "./laundry-notes.js";
 
 const escape = (value) => String(value ?? "").replace(/[&<>"']/g,
     (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
@@ -133,6 +135,39 @@ function lightSymbol(item, geometry) {
     </g>`;
 }
 
+function renderLaundryContext(data) {
+    const ids = new Set(["balcony-dryer", "balcony-washer", "balcony-outboard-sink"]);
+    return data.items.filter((item) => ids.has(item.id) && item.placement &&
+        data.rooms.some((room) => room.id === item.roomId &&
+            HOUSE_ZONE_BY_ID.has(room.id))).map((item) => {
+        const geometry = roomGeometry(data.rooms.find((room) =>
+            room.id === item.roomId));
+        const { x, y } = markerPosition(item, geometry);
+        const knownSize = positive(item.widthCm) && positive(item.depthCm);
+        const width = knownSize ? item.widthCm * geometry.cmScale : 24;
+        const height = knownSize ? item.depthCm * geometry.cmScale : 24;
+        const gas = item.id === "balcony-dryer" &&
+            /8TWGD5050PW/i.test(item.brandModel ?? "");
+        const label = item.id === "balcony-outboard-sink" ? "洗衣盆（條件）" :
+            item.id === "balcony-washer" ? "洗衣機" :
+                gas ? "瓦斯烘衣機（條件）" : "烘衣機（條件）";
+        return `<g class="sheet-laundry-context"
+            data-sheet-context="${escape(item.id)}"
+            data-context-room="${escape(item.roomId)}"
+            transform="translate(${x} ${y})"
+            tabindex="0" role="img"
+            aria-label="${escape(item.name)}；${escape(laundryMarkerNote(item))}；
+                ${knownSize ? "存檔暫估占地" : "尺寸未定，符號非占地"}">
+            <title>${escape(item.name)}；${escape(item.note)}</title>
+            <g transform="rotate(${item.orientation ?? 0})">
+                ${renderObjectIcon(item, width, height)}
+            </g>
+            <text x="0" y="${height / 2 + 16}"
+                text-anchor="middle">${label}</text>
+        </g>`;
+    }).join("");
+}
+
 export function renderElectricalSheet(state, view) {
     if (!["outlet-sheet", "lighting-sheet"].includes(view)) {
         throw new RangeError("未知的配置圖檢視。");
@@ -203,6 +238,11 @@ export function renderElectricalSheet(state, view) {
             `<li><strong>${id}</strong>：${escape(text)}</li>`).join("") : "";
     const removed = data.removedSwitches.map((item) =>
         escape(item.name)).join("、");
+    const hasFloorDryer = data.items.some(isConditionalFloorDryer);
+    const hasLaundry = data.items.some((item) =>
+        ["balcony-dryer", "balcony-washer", "balcony-outboard-sink"].includes(item.id));
+    const hasGasDryer = data.items.some((item) =>
+        item.id === "balcony-dryer" && /8TWGD5050PW/i.test(item.brandModel ?? ""));
     const legend = outlets
         ? `<span class="sheet-R">● R 一般 ${data.counts.R}</span>
            <span class="sheet-B">● B 專用端點 ${data.counts.B}</span>
@@ -230,6 +270,14 @@ export function renderElectricalSheet(state, view) {
         <p class="sheet-caution">${outlets
             ? "R／B／C 均依目前存檔，來源衝突不自動移位；C 是弱電／網路，不是電源。專用迴路只是關聯資料，不是額外插座或已核實線路。"
             : "開關只表示位置，控制對象未核；不畫模擬控制線或實際配線。W 不能推算照度，lm／光束角不足不做照度估算。"}底圖沿用現況牆、窗、門與目前方案；不得據此施工。</p>
+        ${hasLaundry ? `<p class="sheet-caution" data-sheet-laundry-warning>
+            非施工：烘衣機門口／${hasGasDryer ? "燃氣" : "供能"}／排氣、
+            外推荷重／盆體支撐待核；
+            ${hasFloorDryer
+                ? "原水槽擬拆，刪線幽靈框是歷史占地，尚未拆除。"
+                : "原水槽仍為現況，家電依此存檔位置顯示。"}
+            洗衣／烘衣／盆體輪廓僅作目前條件方案對照，
+            不代表管線已搬移。</p>` : ""}
         ${unplaced ? `<p class="sheet-caution">${unplaced} 筆缺位置或可對應房間，
             未畫入底圖；請查下方清單。</p>` : ""}
         ${warnings ? `<details class="sheet-warnings">
@@ -246,7 +294,7 @@ export function renderElectricalSheet(state, view) {
         <div class="sheet-scroll" tabindex="0" role="region"
             aria-label="${title}可捲動圖面">
             ${renderOverviewPlan(data.rooms, data.items, false, null,
-                layers, null, 80, draw)}
+                layers, null, 80, draw, renderLaundryContext(data))}
         </div>
         <details class="sheet-schedule">
             <summary>${outlets ? "端點" : "燈具與有效開關"}文字清單
