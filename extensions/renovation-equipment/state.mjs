@@ -40,6 +40,9 @@ import {
     GUEST_BATH_GRAB_BAR, RINSE_KIT_REFERENCE_PRICE_TWD,
 } from "./assets/bathroom-fixtures.js";
 import {
+    isBathroomInstallationIncluded, normalizeBathroomInstallationNote,
+} from "./assets/bathroom-installation.js";
+import {
     AC_ROOM_IDS, isSplitAirConditioner, OUTDOOR_AC_ESTIMATED_SIZE_CM,
     OUTDOOR_AC_SIZE_BOUNDS_CM, OUTDOOR_AC_ZONES, outdoorACZoneChoices,
 } from "./assets/ac-outdoors.js";
@@ -187,13 +190,16 @@ export function initialState() {
                     ? FRESH_AIR_MODEL
                     : isToilet ? "TOTO CW288SGUR" : "TOTO（品牌暫填，型號待選）",
                 unitPrice: isToilet ? 19035 : null,
+                installationUnitPrice: isBathroomInstallationIncluded({
+                    id: `${room.id}-${suffix}`, roomId: room.id, kind: "equipment",
+                }) ? 0 : null,
                 priceCurrency: "TWD",
                 priceSource: isToilet
                     ? "PChome 24h：https://24h.pchome.com.tw/prod/DEDW02-A900IZ2PV" : "",
                 note: note + (placement ? suffix === "heater"
                     ? "依等比例格局圖暫定機身位置；室外進氣管線須現場核對。" :
                         "依原格局圖暫定位置；實際尺寸與排水需確認。" : "") +
-                    (isToilet ? "PChome售價不含安裝，價格可能變動。" : "") +
+                    (isToilet ? "PChome售價不含安裝；原報兩套衛浴安裝已含，本件另加 NT$0。價格可能變動。" : "") +
                     (suffix === "heater" ? FRESH_AIR_NOTE : ""),
                 placement: placement ? { ...placement } : null,
                 orientation: null,
@@ -457,9 +463,10 @@ export function initialState() {
         unit: "座",
         brandModel: "凱薩 U0211-A624",
         unitPrice: null,
+        installationUnitPrice: 0,
         priceCurrency: "TWD",
         priceSource: "",
-        note: "暫標在主浴馬桶左側，依最新圖面示意；尺寸、感應供電、給排水、固定方式與安裝費待確認。原報價未列此設備本體。",
+        note: "暫標在主浴馬桶左側，依最新圖面示意；本體價格待報。衛浴設備安裝暫列原報價已含、另加安裝費 0 元；感應供電、給排水、固定及新增器具是否超出原安裝範圍仍待廠商確認。",
         placement: { x: 0.081, y: 0.822 },
         orientation: null,
         kind: "equipment",
@@ -513,9 +520,10 @@ export function initialState() {
         unit: "座",
         brandModel: "OVO BK106A",
         unitPrice: 30000,
+        installationUnitPrice: 0,
         priceCurrency: "TWD",
         priceSource: "使用者預算暫估（非商家報價）",
-        note: "W110×D70×H56±2cm，145L。原圖坐式浴缸標示80，改選110cm是否放得下、排水與安裝費均待確認。",
+        note: "W110×D70×H56±2cm，145L。原圖坐式浴缸標示80，改選110cm是否放得下及排水改管須確認；一般衛浴設備安裝暫列原報價已含、另加安裝費 0 元，改尺寸施工補差仍待廠商核對。",
         placement: { x: 0.16, y: 0.23 },
         orientation: null,
         kind: "equipment",
@@ -1200,9 +1208,16 @@ export function validateState(data) {
         if (!recessedAssembly && item.fixtureUnitPrice != null) {
             throw new StoreError(400, "只有崁燈可設定燈具拆估單價。");
         }
-        if (!recessedAssembly && !ceilingAssembly && !trackAssembly &&
-            item.installationUnitPrice != null) {
-            throw new StoreError(400, "只有崁燈、吸頂燈與軌道燈可設定安裝單價。");
+        const includedBathroomInstallation = isBathroomInstallationIncluded({
+            id, roomId, kind,
+        });
+        if (includedBathroomInstallation && item.installationUnitPrice != null &&
+            item.installationUnitPrice !== 0) {
+            throw new StoreError(400, "原報價已含的衛浴器具安裝費須為 0 元；額外施工請另列待報項目。");
+        }
+        if (!includedBathroomInstallation && !recessedAssembly &&
+            !ceilingAssembly && !trackAssembly && item.installationUnitPrice != null) {
+            throw new StoreError(400, "只有燈具或原報已含的一般衛浴器具可設定安裝單價。");
         }
         if (kind !== "door" && item.trackLengthM != null) {
             throw new StoreError(400, "只有門位可以設定額外滑門軌道長度。");
@@ -1255,8 +1270,9 @@ export function validateState(data) {
         const selectedUnitPrice = optionalNumber(item.unitPrice, "單價");
         const fixtureUnitPrice = recessedAssembly
             ? optionalNumber(item.fixtureUnitPrice ?? null, "崁燈燈具拆估單價") : null;
-        const installationUnitPrice = recessedAssembly || ceilingAssembly || trackAssembly
-            ? optionalNumber(item.installationUnitPrice ?? null, "燈具安裝單價") : null;
+        const installationUnitPrice = includedBathroomInstallation ? 0 :
+            recessedAssembly || ceilingAssembly || trackAssembly
+                ? optionalNumber(item.installationUnitPrice ?? null, "燈具安裝單價") : null;
         const spotlightUnitPrice = trackAssembly
             ? optionalNumber(item.spotlightUnitPrice ?? null, "軌道燈單價") : null;
         if (recessedAssembly && lightSelection !== null) {
@@ -1294,6 +1310,9 @@ export function validateState(data) {
             throw new StoreError(400, "預設軌道燈瓦數須與所選型號一致；請改選自訂款。");
         }
         const template = kind === "furniture" ? FURNITURE_TEMPLATES[furnitureType] : null;
+        const note = normalizeBathroomInstallationNote({
+            id, roomId, kind, note: optionalText(item.note, "備註", 1000),
+        });
         const productWidth = item.id.endsWith("-toilet") && item.brandModel === "TOTO CW288SGUR"
             ? 45.2 : item.id === "bath-guest-tub" && item.brandModel === "OVO BK106A" ? 110 : null;
         const productDepth = item.id.endsWith("-toilet") && item.brandModel === "TOTO CW288SGUR"
@@ -1308,7 +1327,7 @@ export function validateState(data) {
             unitPrice: selectedUnitPrice,
             priceCurrency: itemCurrency,
             priceSource: optionalText(item.priceSource ?? "", "價格來源", 500),
-            note: optionalText(item.note, "備註", 1000),
+            note: optionalText(note, "備註", 1000),
             placement: optionalPlacement(item.placement),
             acPlanStatus,
             outdoorPlacement: splitAC ? optionalPlacement(item.outdoorPlacement) : null,

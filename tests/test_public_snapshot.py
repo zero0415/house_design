@@ -32,7 +32,8 @@ class PublicSnapshotTests(unittest.TestCase):
     def test_public_docs_match_derived_sample(self):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         quote = QUOTE.read_text(encoding="utf-8")
-        for value in ("51", "9", "7", "27,000", "51,500", "2,115,134"):
+        for value in ("51", "9", "7", "27,000", "51,500", "2,115,134",
+                      "16,000", "10 筆", "NT$0"):
             with self.subTest(value=value):
                 self.assertIn(value, readme)
                 self.assertIn(value, quote)
@@ -41,6 +42,10 @@ class PublicSnapshotTests(unittest.TestCase):
         self.assertIn("廚房附件", readme)
         self.assertIn("不自動移入屋內", readme)
         self.assertIn("不自動移入屋內", quote)
+        self.assertIn("免治便座、新風機、電熱毛巾架、防滑扶手", readme)
+        self.assertIn("安裝費來源", quote)
+        self.assertIn("返回全屋格局", readme)
+        self.assertIn("切換房間", quote)
 
     def test_sample_is_deidentified_without_losing_the_plan(self):
         state = json.loads(SAMPLE.read_text(encoding="utf-8"))
@@ -69,6 +74,40 @@ class PublicSnapshotTests(unittest.TestCase):
         self.assertFalse(any(re.fullmatch(
             r"[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}", item["id"], re.I
         ) for item in state["items"]))
+
+    def test_bathroom_included_installation_is_exactly_ten_zeroes(self):
+        state = json.loads(SAMPLE.read_text(encoding="utf-8"))
+        by_id = {item["id"]: item for item in state["items"]}
+        fixture_ids = {
+            *(f"{room}-{fixture}" for room in ("bath-main", "bath-guest")
+              for fixture in ("toilet", "vanity", "basin-tap", "shower")),
+            "bath-main-urinal-u0211-a624", "bath-guest-tub",
+        }
+        self.assertEqual(len(fixture_ids), 10)
+        self.assertEqual({item["id"] for item in state["items"]
+                          if item.get("installationUnitPrice") == 0}, fixture_ids)
+        self.assertTrue(all(by_id[fixture]["kind"] == "equipment" and
+                            by_id[fixture]["roomId"] in {"bath-main", "bath-guest"} and
+                            by_id[fixture]["quotedUnitPrice"] is None
+                            for fixture in fixture_ids))
+        self.assertEqual((by_id["bath-main-toilet"]["unitPrice"],
+                          by_id["bath-guest-toilet"]["unitPrice"],
+                          by_id["bath-guest-tub"]["unitPrice"]), (19035, 19035, 30000))
+        self.assertTrue(all(by_id[fixture]["unitPrice"] is None
+                            for fixture in fixture_ids -
+                            {"bath-main-toilet", "bath-guest-toilet", "bath-guest-tub"}))
+        for room in ("bath-main", "bath-guest"):
+            with self.subTest(room=room):
+                self.assertEqual(sum(by_id[fixture]["roomId"] == room
+                                     for fixture in fixture_ids), 5)
+                for excluded in ("heater", "bidet-tcf8cm76",
+                                 "heated-towel-rail", "rinse-kit"):
+                    self.assertIsNone(by_id[f"{room}-{excluded}"]["installationUnitPrice"])
+        self.assertIsNone(by_id["bath-guest-tub-grab-bar"]["installationUnitPrice"])
+        self.assertEqual(by_id["quoted-downlight-06"]["installationUnitPrice"], 750)
+        self.assertIn("原報兩套衛浴安裝已含", by_id["bath-main-toilet"]["note"])
+        self.assertIn("超出原安裝額度的補差", by_id["bath-main-urinal-u0211-a624"]["note"])
+        self.assertIn("排水改管", by_id["bath-guest-tub"]["note"])
 
     def test_derived_electrical_endpoints_and_safety_warnings(self):
         items = json.loads(SAMPLE.read_text(encoding="utf-8"))["items"]
@@ -146,7 +185,8 @@ class PublicSnapshotTests(unittest.TestCase):
         self.assertIn("assets/app.js", {entry["path"] for entry in bundle["modules"]})
         self.assertIn("assets/floorplan.js", {entry["path"] for entry in bundle["modules"]})
         self.assertIn("assets/survey.js", {entry["path"] for entry in bundle["modules"]})
-        for name in ("kitchen-plan.js", "kitchen-icons.js", "outlet-diagram.js"):
+        for name in ("kitchen-plan.js", "kitchen-icons.js", "outlet-diagram.js",
+                     "bathroom-installation.js"):
             self.assertIn(f"assets/{name}", {entry["path"] for entry in bundle["modules"]})
         self.assertIn("state-browser.mjs", {entry["path"] for entry in bundle["modules"]})
         self.assertNotRegex(html, r"(?i)<\s*(?:img|image)\b|data:image/|base64,")

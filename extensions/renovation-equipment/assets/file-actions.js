@@ -11,6 +11,9 @@ import {
 } from "./socket-plan.js";
 import { upgradeLegacyLightingState } from "./lighting-options.js";
 import { lightDataStatus } from "./lighting-preview.js";
+import {
+    BATHROOM_INSTALLATION_QUOTE, isBathroomInstallationIncluded,
+} from "./bathroom-installation.js";
 
 export const SAVE_FORMAT = "renovation-equipment-planner";
 export const SAVE_FORMAT_VERSION = PLANNER_STATE_VERSION;
@@ -84,7 +87,7 @@ function csvCell(value) {
 
 const CSV_COLUMNS = Object.freeze([
     "房間", "圖面分類", "名稱", "品牌／型號／規格", "數量", "單位",
-    "商品單價", "幣別", "商品小計", "安裝小計（新台幣）",
+    "商品單價", "幣別", "商品小計", "安裝小計（新台幣）", "安裝費來源",
     "軌道燈盞數", "軌道燈小計", "原報價基準（新台幣）",
     "原報價已含", "插座迴路", "對應插座 ID", "圖上 X（%）", "圖上 Y（%）",
     "室外機窗位（示意）", "室外機暫估尺寸（cm）", "價格來源", "備註",
@@ -106,6 +109,7 @@ export function itemListCsv(state) {
         }
         const amount = itemSubtotal(item, state.items);
         const installation = installationSubtotal(item);
+        const bathroomInstallationIncluded = isBathroomInstallationIncluded(item);
         const spotlights = spotlightSubtotal(item);
         const quote = isQuotedEquipment(item);
         return [
@@ -117,7 +121,12 @@ export function itemListCsv(state) {
                     outlets: "插座", structure: "門牆" })[planDisplayCategory(item)],
             item.name, item.brandModel, item.quantity ?? "待補", item.unit,
             item.unitPrice ?? "待補", item.priceCurrency, amount ?? "待補",
-            installation === 0 ? "" : installation ?? "待補",
+            bathroomInstallationIncluded ? 0 : installation === 0 ? "" :
+                installation ?? "待補",
+            bathroomInstallationIncluded
+                ? `原報價衛浴設備安裝 ${BATHROOM_INSTALLATION_QUOTE.suites} 套 × ` +
+                    `NT$${BATHROOM_INSTALLATION_QUOTE.unitPriceTWD} 已含；改管補強另核`
+                : "",
             item.lightType === "track" ? item.spotlightQuantity : "",
             item.lightType === "track" ? spotlights ?? "待補" : "",
             quote ? item.quotedQuantity * item.quotedUnitPrice : "",

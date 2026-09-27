@@ -17,6 +17,7 @@ const assets = new Map([
     ["/floorplan.js", [join(extensionDirectory, "assets", "floorplan.js"), "text/javascript; charset=utf-8"]],
     ["/house-geometry.js", [join(extensionDirectory, "assets", "house-geometry.js"), "text/javascript; charset=utf-8"]],
     ["/furniture.js", [join(extensionDirectory, "assets", "furniture.js"), "text/javascript; charset=utf-8"]],
+    ["/bathroom-installation.js", [join(extensionDirectory, "assets", "bathroom-installation.js"), "text/javascript; charset=utf-8"]],
     ["/kitchen-icons.js", [join(extensionDirectory, "assets", "kitchen-icons.js"), "text/javascript; charset=utf-8"]],
     ["/kitchen-plan.js", [join(extensionDirectory, "assets", "kitchen-plan.js"), "text/javascript; charset=utf-8"]],
     ["/outlet-diagram.js", [join(extensionDirectory, "assets", "outlet-diagram.js"), "text/javascript; charset=utf-8"]],

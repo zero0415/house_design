@@ -49,6 +49,9 @@ import {
     isBathGrabBar, isFreshAirUnit, isHeatedTowelRail, isToiletRinseKit,
     RINSE_KIT_REFERENCE_PRICE_TWD,
 } from "./bathroom-fixtures.js";
+import {
+    BATHROOM_INSTALLATION_QUOTE, isBathroomFixtureId, isBathroomInstallationIncluded,
+} from "./bathroom-installation.js";
 import { CEILING_LIGHT_INSTALL_UNIT_PRICE_TWD } from "./ceiling-lights.js";
 import {
     CEILING_LIGHT_OPTIONS, DOWNLIGHT_FIXTURE_ESTIMATE_TWD,
@@ -257,6 +260,10 @@ function itemAmountLabel(item) {
     }
     if (isQuotedDownlight(item) && amount === null) return "換款待報 · 原 NT$950 已含";
     if (isDownlight(item) && amount === null) return "新增崁燈本體／安裝待報";
+    if (isBathroomInstallationIncluded(item)) {
+        return `${amount === null ? "商品本體待補" :
+            `商品 ${formattedAmount(item, amount)}`} · 安裝 NT$0（原報已含）`;
+    }
     if (amount === null) return "待補數量／單價";
     if (isSlideTrack(item) && amount === 0) return "NT$0（軌道暫未使用）";
     return formattedAmount(item, amount);
@@ -565,6 +572,7 @@ function field(item, name, label, options = {}) {
             isFreshAirUnit(item) || isToiletRinseKit(item) ||
             isHeatedTowelRail(item) || isBathGrabBar(item)) &&
             (name === "quantity" || name === "unit")) ||
+        (isBathroomInstallationIncluded(item) && name === "installationUnitPrice") ||
         (isSwitch(item) &&
             (name === "quantity" || name === "unit" ||
                 name === "brandModel" && !isOutdoorSwitch(item) &&
@@ -792,6 +800,7 @@ function renderItem(item, { displayName = null, circuitNumber = null } = {}) {
     const fanInstallation = isProvisionalFreshAirInstallation(item);
     const splitAC = isSplitAirConditioner(item);
     const excludedAC = splitAC && item.acPlanStatus === "excluded";
+    const bathroomInstallationIncluded = isBathroomInstallationIncluded(item);
     const displayCategory = planDisplayCategory(item);
     const linkedProduct = item.productId
         ? state.products.find((product) => product.id === item.productId) : null;
@@ -831,6 +840,7 @@ function renderItem(item, { displayName = null, circuitNumber = null } = {}) {
             rinseKit ? "馬桶旁三叉管＋沖洗器 · 安裝待核" : null,
         towelRail ? "衛浴乾區牆面暫位 · 電源、防潮及安裝待核" :
             grabBar ? "浴缸牆面暫位 · 固定承重待核" : null,
+            bathroomInstallationIncluded ? "只計商品本體；安裝由原報衛浴兩套額度涵蓋" : null,
         excludedAC ? "臥室2無可確認室外機路徑 · 原室內標位已保留" :
             splitAC ? `室外機同套暫位：${item.outdoorPlacement
                 ? outdoorACZone(item).label : "位置待現勘"} ·
@@ -938,6 +948,13 @@ function renderItem(item, { displayName = null, circuitNumber = null } = {}) {
             目前為<strong>真正引入室外空氣的新風機</strong>，先前的 Panasonic 暖風乾燥機
             不是這種設備，其 NT$6,600 不能沿用。新風機本體型號、衛浴適用性、
             外牆進氣路徑與價格均待核；圖上標記僅作位置示意。</p>` : ""}
+        ${bathroomInstallationIncluded ? `<p class="quoted-baseline">
+            原水電報價「衛浴設備安裝」${BATHROOM_INSTALLATION_QUOTE.suites} 套 ×
+            NT$${currency.format(BATHROOM_INSTALLATION_QUOTE.unitPriceTWD)}＝
+            NT$${currency.format(BATHROOM_INSTALLATION_QUOTE.totalTWD)}，已含於原工程款。
+            本器具<strong>只列商品本體價；安裝費 NT$0（原報已含）</strong>，
+            不再按器具逐件追加安裝費。新增小便斗、改尺寸浴缸或改管／補強
+            是否超出兩套安裝額度仍須廠商核對；感應供電等特殊施工另議。</p>` : ""}
         ${rinseKit ? `<p class="quoted-baseline">
             三叉管及馬桶沖洗器一組暫依你提供的特力屋價格
             NT$${currency.format(RINSE_KIT_REFERENCE_PRICE_TWD)}，不含另確認的安裝工；
@@ -1025,12 +1042,16 @@ function renderItem(item, { displayName = null, circuitNumber = null } = {}) {
                     { cssClass: "installation-price" }) +
                 `<p class="downlight-breakdown" data-downlight-breakdown-id="${id}">
                     ${downlightPriceBreakdown(item)}</p>` :
-                field(item, "unitPrice", showerDoor ? "額外門型價差" :
+                field(item, "unitPrice", bathroomInstallationIncluded
+                    ? "商品本體單價（安裝原報已含）" : showerDoor ? "額外門型價差" :
                     ceilingLight ? "燈具本體單價（待選）" :
                         trackLighting ? "軌道單價（1.5 米）" :
                             circuit ? "專用迴路單價（暫估 4,500）" :
                                 socket ? "插座單價（暫估 1,800）" : "單價",
                     { cssClass: "price" })}
+            ${bathroomInstallationIncluded ? field(item, "installationUnitPrice",
+                "安裝費（NT$0，原報已含）",
+                { cssClass: "installation-price" }) : ""}
             ${trackLighting ? field(item, "spotlightModel", "軌道燈型號（可修改）",
                 { cssClass: "model" }) +
                 field(item, "spotlightQuantity", "軌道燈數量（盞）",
@@ -2411,8 +2432,15 @@ function renderPlanView() {
 
     return `<section class="plan-detail">
         <div class="plan-detail-header">
-            <button type="button" data-action="all-rooms">← 全屋格局</button>
-            <label>切換房間<select data-plan-room-select>${roomChoices}</select></label>
+            <nav class="plan-room-navigation" aria-label="全屋與房間格局切換">
+                <button type="button" class="back-to-overview" data-action="all-rooms"
+                    aria-label="返回全屋格局總覽">← 返回全屋格局</button>
+                <label class="room-switcher">
+                    <span>切換房間 · 目前：<strong>${escapeHtml(room.name)}</strong></span>
+                    <select data-plan-room-select aria-label="選擇要查看的房間">
+                        ${roomChoices}</select>
+                </label>
+            </nav>
             ${sourceToggle}
         </div>
         <h2>${escapeHtml(room.name)}</h2>
@@ -3395,6 +3423,9 @@ function itemFieldChanged(target) {
             item.orientation = null;
         }
         item.roomId = target.value;
+        if (isBathroomFixtureId(item.id)) {
+            item.installationUnitPrice = isBathroomInstallationIncluded(item) ? 0 : null;
+        }
     } else {
         const previousValue = item[name];
         item[name] = target.value;
