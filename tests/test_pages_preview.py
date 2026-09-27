@@ -39,8 +39,40 @@ INCLUDED_BATHROOM_IDS = {
 }
 
 
-def legacy_bathroom_save():
+def previous_public_balcony_save():
     state = json.loads(SAMPLE.read_text(encoding="utf-8"))
+    state["items"] = [item for item in state["items"]
+                      if item["id"] != "balcony-outboard-sink"]
+    by_id = {item["id"]: item for item in state["items"]}
+    dryer = by_id["balcony-dryer"]
+    dryer.update(
+        roomId="ac-platform", orientation=180,
+        placement={"x": .857, "y": .5},
+        note="Whirlpool 8TWGD5050PW 瓦斯烘衣機本體 NT$20,599；機身寬73.7×深72.1×高102.9cm，原外推鐵窗暫位不移。約78cm毛深與機身深度只差約5.9cm，尚未扣框架、排氣或維修；供氣、排煙、防雨、承重振動、防火與合法許可全未核，須合格人員現勘，嚴禁據圖施工。",
+    )
+    by_id["balcony-washer"]["note"] = (
+        "Whirlpool 8TWTW5010PW 洗衣機本體參考 NT$21,150；機身寬 70.5×深 68.6cm，"
+        "保留陽台原標位。圖上未含安裝與維修淨空；給排水、供電、門淨寬及實際施工另核。"
+    )
+    by_id["balcony-water-heater"]["note"] = (
+        "暫標在陽台右側牆面（烘衣機已移至外推鐵窗）；窄條僅表示牆面位置，"
+        "與烘衣機可能在不同高度，非實際機身尺寸。熱水器型式、型號、尺寸、安裝高度、"
+        "與烘衣機安全間距、電源或瓦斯、給排水及排氣須現場由合格廠商確認。"
+        "原報價熱水器安裝單價2,500元／組但數量未填（本次0元）；本體及安裝費待報。"
+    )
+    product = next(row for row in state["products"] if row["id"] == "sample-product-26")
+    product["name"] = "Whirlpool 8TWGD5050PW 瓦斯烘衣機（鐵窗暫位）"
+    product["note"] = (
+        "機身寬73.7×深72.1×高102.9cm。外推鐵窗約78cm毛深僅剩約5.9cm，"
+        "未扣框架、排氣、維修；瓦斯供應、排煙防雨、荷重振動、防火、固定防墜"
+        "與合法許可全未核。條件式暫位，不得據圖施工。"
+    )
+    assert len(state["items"]) == 179
+    return state
+
+
+def legacy_bathroom_save():
+    state = previous_public_balcony_save()
     previous_notes = {
         "bath-main-toilet": (
             "原報兩套衛浴一般安裝已含，另加 NT$0；改管另待核。",
@@ -163,11 +195,211 @@ class PagesPreviewTests(unittest.TestCase):
             )
             state = page.evaluate("globalThis.__RENOVATION_OFFLINE_STORE__.read()")
             self.assertEqual(state["rooms"][3]["ceilingHeightCm"], 270)
-            self.assertEqual((len(state["items"]), len(state["products"])), (179, 28))
+            self.assertEqual((len(state["items"]), len(state["products"])), (180, 28))
             self.assertEqual(len([url for url in requests if "/files/" in url]), 1)
             self.assertEqual(errors, [])
         finally:
             context.close()
+
+    def test_fresh_balcony_is_vector_only_and_keeps_visible_safety_cues(self):
+        context = self.browser.new_context(viewport={"width": 1280, "height": 950})
+        try:
+            page = context.new_page()
+            errors = []
+            requests = []
+            page.on("pageerror", lambda error: errors.append(str(error)))
+            page.on("request", lambda request: requests.append(request.url)
+                    if request.url.startswith(("http:", "https:")) else None)
+            self.open_demo(page)
+            state = page.evaluate("globalThis.__RENOVATION_OFFLINE_STORE__.read()")
+            self.assertEqual((len(state["items"]), len(state["products"]),
+                              state["revision"], state["undo"]), (180, 28, 0, None))
+            self.assertEqual(page.locator("#overall-total").inner_text(),
+                             "NT$2,318,560.2")
+            overview = page.locator(".overview-svg")
+            self.assertEqual(overview.locator(".fixed-balcony-sink").count(), 1)
+            self.assertEqual(overview.locator(
+                '[data-demolition-status="proposed"]').count(), 1)
+            self.assertEqual(overview.locator(
+                '[data-marker-id="balcony-dryer"].out-of-bounds').count(), 0)
+            self.assertIn("非可施工", page.locator(
+                '[data-laundry-warning="balcony-dryer"]').first.inner_text())
+            dryer_warning = page.locator(
+                '[data-laundry-warning="balcony-dryer"]').first
+            self.assertIsNone(dryer_warning.locator(
+                ".warning-details").get_attribute("open"))
+            dryer_warning.locator("summary").click()
+            self.assertIn("R33", dryer_warning.inner_text())
+            dryer_warning.locator("summary").click()
+            self.assertIn("獨立混凝土支撐", page.locator(
+                '[data-laundry-warning="balcony-outboard-sink"]').first.inner_text())
+
+            overview.locator('.plan-zone[data-select-room="balcony"]').click()
+            self.assertEqual(page.locator(
+                'svg[data-room-canvas="balcony"] .fixed-balcony-sink').count(), 1)
+            self.assertEqual(page.locator(
+                'svg[data-room-canvas="balcony"] .conditional-floor-dryer').count(), 1)
+            self.assertEqual(page.locator(
+                'svg[data-room-canvas="balcony"] '
+                '[data-demolition-status="proposed"]').count(), 1)
+            reference = page.locator(".balcony-reference")
+            self.assertEqual(reference.locator("svg[data-balcony-reference='vector']").count(), 1)
+            self.assertTrue(reference.locator("svg").is_visible())
+            self.assertEqual(reference.locator("img, image, foreignObject").count(), 0)
+            self.assertIn("非施工配置", reference.locator(
+                ".balcony-safety-cue").inner_text())
+            details = reference.locator(".balcony-safety-details")
+            self.assertIsNone(details.get_attribute("open"))
+            before = page.evaluate("globalThis.__RENOVATION_OFFLINE_STORE__.read()")
+            budget = page.locator(".budget").inner_text()
+            details.locator("summary").focus()
+            page.keyboard.press("Enter")
+            self.assertIsNotNone(details.get_attribute("open"))
+            self.assertIn("不可用軟管跨門", details.inner_text())
+            self.assertIn("可靠混凝土結構", details.inner_text())
+            details.locator("summary").focus()
+            page.keyboard.press("Space")
+            self.assertIsNone(details.get_attribute("open"))
+            self.assertEqual(page.evaluate(
+                "globalThis.__RENOVATION_OFFLINE_STORE__.read()"), before)
+            self.assertEqual(page.locator(".budget").inner_text(), budget)
+
+            page.set_viewport_size({"width": 390, "height": 844})
+            reference.locator(".balcony-reference-scroll").scroll_into_view_if_needed()
+            self.assertTrue(reference.locator(".balcony-reference-scroll").evaluate(
+                "node => node.scrollWidth > node.clientWidth"))
+            self.assertGreaterEqual(reference.locator("svg").evaluate(
+                "node => node.getBoundingClientRect().width"), 650)
+            balcony_scroll = page.evaluate("document.documentElement.scrollWidth")
+            page.locator('[data-action="all-rooms"]').click()
+            self.assertLessEqual(balcony_scroll, page.evaluate(
+                "document.documentElement.scrollWidth"))
+            page.locator('.overview-svg .plan-zone[data-select-room="balcony"]').click()
+            self.assertEqual(page.locator(".budget").inner_text(), budget)
+            page.locator("[data-plan-room-select]").select_option("ac-platform")
+            self.assertEqual(page.locator(
+                'svg[data-room-canvas="ac-platform"] '
+                '[data-marker-id="balcony-outboard-sink"] .object-icon').count(), 1)
+            self.assertEqual(page.locator(
+                'svg[data-room-canvas="ac-platform"] '
+                '[data-marker-id="balcony-outboard-sink"] .conditional-outboard-basin').count(), 1)
+            self.assertGreaterEqual(page.locator(
+                'svg[data-room-canvas="ac-platform"] '
+                '[data-marker-id="balcony-outboard-sink"] .icon-basin').count(), 1)
+            self.assertEqual(page.locator(
+                'svg[data-room-canvas="ac-platform"] '
+                '[data-marker-id="balcony-outboard-sink"].square-label').count(), 0)
+            self.assertEqual(errors, [])
+            self.assertEqual(len([url for url in requests if "/files/" in url]), 1)
+            self.assertTrue(all(url.startswith(self.base) for url in requests))
+        finally:
+            context.close()
+
+    def test_offline_edge_balcony_drag_and_basin_undo_stay_vector_only(self):
+        if not EDGE:
+            self.skipTest("Microsoft Edge is not installed")
+        browser = self.playwright.chromium.launch(
+            executable_path=EDGE, headless=True
+        )
+        try:
+            context = browser.new_context(
+                viewport={"width": 390, "height": 844}, accept_downloads=True
+            )
+            try:
+                page = context.new_page()
+                errors = []
+                requests = []
+                page.on("pageerror", lambda error: errors.append(str(error)))
+                page.on("request", lambda request: requests.append(request.url)
+                        if request.url.startswith(("http:", "https:")) else None)
+                page.on("dialog", lambda dialog: dialog.accept())
+                page.goto(PORTABLE.as_uri())
+                page.wait_for_function("Boolean(globalThis.__RENOVATION_OFFLINE_STORE__)")
+                page.locator("#load-file-input").set_input_files(str(SAMPLE))
+                page.wait_for_function(
+                    "document.querySelector('#overall-total').textContent.includes('2,318,560')",
+                    timeout=15000,
+                )
+                page.locator('.overview-svg .plan-zone[data-select-room="balcony"]').click()
+                reference = page.locator(".balcony-reference")
+                self.assertTrue(reference.locator(
+                    'svg[data-balcony-reference="vector"]').is_visible())
+                self.assertEqual(reference.locator("img, image").count(), 0)
+                self.assertIsNone(reference.locator(
+                    ".balcony-safety-details").get_attribute("open"))
+                self.assertTrue(reference.locator(
+                    ".balcony-reference-scroll").evaluate(
+                        "node => node.scrollWidth > node.clientWidth"))
+                budget = page.locator(".budget").inner_text()
+
+                page.locator("[data-plan-item-select]").select_option("balcony-dryer")
+                svg = page.locator('svg[data-room-canvas="balcony"]')
+                svg.scroll_into_view_if_needed()
+                point = svg.evaluate("""node => {
+                    const p = node.createSVGPoint(); p.x = 615; p.y = 1788;
+                    const from = p.matrixTransform(node.getScreenCTM());
+                    p.x += 8;
+                    const to = p.matrixTransform(node.getScreenCTM());
+                    return {x:from.x,y:from.y,toX:to.x,toY:to.y};
+                }""")
+                page.mouse.move(point["x"], point["y"])
+                page.mouse.down()
+                page.mouse.move(point["toX"], point["toY"], steps=6)
+                page.mouse.up()
+                page.locator("#save-now").click()
+                page.wait_for_function("""async () =>
+                    (await globalThis.__RENOVATION_OFFLINE_STORE__.read()).items
+                        .find(item => item.id === 'balcony-dryer').placement.x > .14
+                """, timeout=15000)
+                self.assertEqual(svg.locator(
+                    '[data-marker-id="balcony-dryer"].out-of-bounds').count(), 0)
+                self.assertEqual(page.locator(".budget").inner_text(), budget)
+                page.locator("#undo-last").click()
+                page.wait_for_function("""async () =>
+                    (await globalThis.__RENOVATION_OFFLINE_STORE__.read()).items
+                        .find(item => item.id === 'balcony-dryer').placement.x < .13
+                """, timeout=15000)
+                self.assertEqual(svg.locator(
+                    '[data-demolition-status="proposed"]').count(), 1)
+
+                page.locator("[data-plan-room-select]").select_option("ac-platform")
+                page.locator("[data-plan-item-select]").select_option(
+                    "balcony-outboard-sink")
+                self.assertEqual(page.locator(
+                    'svg[data-room-canvas="ac-platform"] '
+                    '[data-marker-id="balcony-outboard-sink"] .object-icon').count(), 1)
+                self.assertGreaterEqual(page.locator(
+                    'svg[data-room-canvas="ac-platform"] '
+                    '[data-marker-id="balcony-outboard-sink"] .icon-basin').count(), 1)
+                page.locator('[data-action="remove-plan-item"]').click()
+                page.locator('[data-action="confirm-remove-item"]').click()
+                page.locator("#save-now").click()
+                page.wait_for_function("""async () =>
+                    !(await globalThis.__RENOVATION_OFFLINE_STORE__.read()).items
+                        .some(item => item.id === 'balcony-outboard-sink')
+                """, timeout=15000)
+                page.locator("#undo-last").click()
+                page.wait_for_function("""async () =>
+                    (await globalThis.__RENOVATION_OFFLINE_STORE__.read()).items
+                        .some(item => item.id === 'balcony-outboard-sink')
+                """, timeout=15000)
+                with page.expect_download() as download:
+                    page.locator("#export-items").click()
+                rows = list(csv.DictReader(StringIO(
+                    Path(download.value.path()).read_text(encoding="utf-8-sig")
+                )))
+                basin = next(row for row in rows if row["名稱"] ==
+                             "外推區掛牆洗衣盆（條件式）")
+                self.assertEqual(basin["商品單價"], "待補")
+                self.assertNotIn("烘衣機已移至外推鐵窗",
+                                 "\n".join(row["備註"] for row in rows))
+                self.assertEqual(page.locator(".budget").inner_text(), budget)
+                self.assertEqual(requests, [])
+                self.assertEqual(errors, [])
+            finally:
+                context.close()
+        finally:
+            browser.close()
 
     def test_public_helpers_keep_derived_data_and_reject_partial_layouts(self):
         context = self.browser.new_context()
@@ -517,7 +749,7 @@ class PagesPreviewTests(unittest.TestCase):
                              ["kitchen-plan-tower", "kitchen-plan-return"]
                              if report["changed"] else [])
             self.assertEqual((report["itemCount"], report["productCount"],
-                              report["revision"]), (179, 28, 0))
+                              report["revision"]), (180, 28, 0))
             self.assertEqual((report["baseline"], report["total"]),
                              (1_959_530, 2_318_560.2))
             for key in ("roomsUntouched", "productsUntouched", "sourceUntouched",
@@ -699,11 +931,14 @@ class PagesPreviewTests(unittest.TestCase):
             self.assertNotIn("嚴重過大容量", bedroom.inner_text())
             self.assertEqual(page.locator(
                 '[data-item-id="ac-bedroom-2"][data-outdoor-ac-window]').count(), 0)
-            switcher.select_option("ac-platform")
+            switcher.select_option("balcony")
             self.assertIn("瓦斯烘衣機", page.locator(
                 '[data-laundry-warning="balcony-dryer"]').first.inner_text())
-            self.assertIn("5.9cm", page.locator(
+            self.assertIn("約81cm", page.locator(
                 '[data-laundry-warning="balcony-dryer"]').first.inner_text())
+            self.assertEqual(page.locator(
+                'svg[data-room-canvas="balcony"] '
+                '[data-demolition-status="proposed"]').count(), 1)
             switcher.select_option("corridor")
             rail = page.locator('.corridor-light-choices input[data-field="trackLengthCm"]')
             self.assertEqual(rail.input_value(), "300")
@@ -816,7 +1051,7 @@ class PagesPreviewTests(unittest.TestCase):
                     windowGuard,lengthGuard,invalidStateRejected,
                     csvColumns:['冷氣規劃狀態','冷氣施工費（未核）',
                         '單條燈軌長度（cm）'].every(text => csv.includes(text)),
-                    roundTrip:exported.items.length === 179 &&
+                    roundTrip:exported.items.length === 180 &&
                         exported.products.length === 28 &&
                         exported.items.find(item => item.id === 'kitchen-plan-dishwasher')
                             .installationUnitPrice === null,
@@ -840,8 +1075,9 @@ class PagesPreviewTests(unittest.TestCase):
             self.assertIn("無法判定浴缸完整占地",
                           report["vanity"]["warning"])
             self.assertIn("瓦斯", report["gasWarning"])
-            self.assertIn("5.9cm", report["gasWarning"])
-            self.assertIn("不得依此圖自行施工", report["gasWarning"])
+            self.assertIn("約81cm", report["gasWarning"])
+            self.assertIn("不可用軟管跨門", report["gasWarning"])
+            self.assertIn("不得據圖施工", report["gasWarning"])
             self.assertEqual((report["bedroom2"]["outdoorPlacement"],
                               report["bedroom2"]["outdoorZoneId"]), (None, None))
             self.assertEqual((report["dishwasher"]["widthCm"],
@@ -963,7 +1199,7 @@ class PagesPreviewTests(unittest.TestCase):
                 "installation": 0, "included": True,
             })
             self.assertEqual(report["vanities"], [[60, 47], [60, 47]])
-            self.assertEqual(report["counts"], [179, 28])
+            self.assertEqual(report["counts"], [180, 28])
             self.assertEqual(report["delta"], 0)
             self.assertTrue(report["candidateOnly"])
             self.assertEqual(report["originalQuoteTWD"], 1_959_530)
@@ -1200,7 +1436,7 @@ class PagesPreviewTests(unittest.TestCase):
                 Path(downloaded.value.path()).read_text(encoding="utf-8")
             )["state"]
             self.assertEqual((len(state["items"]), len(state["products"]),
-                              state["undo"]), (179, 28, None))
+                              state["undo"]), (180, 28, None))
             lamp = next(product for product in state["products"] if product["id"] ==
                         "catalog-ceiling-trplus-026036388")
             self.assertEqual((lamp["unitPrice"], lamp["lightWatts"],
@@ -1325,6 +1561,15 @@ class PagesPreviewTests(unittest.TestCase):
             self.assertEqual(requests, [])
             state = page.evaluate("globalThis.__RENOVATION_OFFLINE_STORE__.read()")
             self.assertEqual(state["revision"], 7)
+            self.assertEqual((len(state["items"]), len(state["products"])),
+                             (179, 28))
+            self.assertFalse(any(item["id"] == "balcony-outboard-sink"
+                                 for item in state["items"]))
+            self.assertEqual(next(item for item in state["items"]
+                                  if item["id"] == "balcony-dryer")["roomId"],
+                             "ac-platform")
+            self.assertEqual(page.locator(
+                '.overview-svg [data-demolition-status="proposed"]').count(), 0)
             self.assertEqual(next(room for room in state["rooms"] if room["id"] ==
                                   "kitchen")["ceilingHeightCm"], 275)
             self.assertEqual({item["id"] for item in state["items"]
@@ -1338,6 +1583,9 @@ class PagesPreviewTests(unittest.TestCase):
             self.assertEqual(next(item for item in state["items"]
                                   if item["id"] == "kitchen-plan-tower")["placement"],
                              {"x": 238 / 289, "y": 32 / 165})
+            page.locator('.overview-svg .plan-zone[data-select-room="ac-platform"]').click()
+            self.assertIn("5.9cm", page.locator(
+                '[data-laundry-warning="balcony-dryer"]').first.inner_text())
             stored = json.loads(page.evaluate(
                 "localStorage.getItem('renovation-equipment-offline-v1:' + location.pathname)"
             ))
@@ -1348,7 +1596,7 @@ class PagesPreviewTests(unittest.TestCase):
             context.close()
 
     def test_saved_unselected_laundry_stays_generic_not_a_fake_gas_selection(self):
-        old = json.loads(SAMPLE.read_text(encoding="utf-8"))
+        old = previous_public_balcony_save()
         for item in old["items"]:
             if item["id"] in {"balcony-washer", "balcony-dryer"}:
                 item.update(productId=None, brandModel="", unitPrice=None,
@@ -1409,7 +1657,7 @@ class PagesPreviewTests(unittest.TestCase):
             saved = json.loads(Path(download.value.path()).read_text(encoding="utf-8"))
             self.assertEqual((saved["formatVersion"], len(saved["state"]["items"]),
                               len(saved["state"]["products"]), saved["state"]["undo"]),
-                             (5, 179, 28, None))
+                             (5, 180, 28, None))
             page.locator('.overview-svg .plan-zone[data-select-room="kitchen"]').click()
             self.assertEqual(page.locator(
                 '.room-svg [data-marker-id^="kitchen-plan-"]').count(), 12)
@@ -1429,7 +1677,7 @@ class PagesPreviewTests(unittest.TestCase):
             page.wait_for_function("""async () => {
                 const state = await globalThis.__RENOVATION_OFFLINE_STORE__.read();
                 return state.rooms.find(room => room.id === 'kitchen').ceilingHeightCm ===
-                    null && state.items.length === 179;
+                    null && state.items.length === 180;
             }""", timeout=15000)
             self.assertEqual(page.locator("#overall-total").inner_text(), "NT$2,318,560.2")
         finally:
@@ -1465,7 +1713,7 @@ class PagesPreviewTests(unittest.TestCase):
             page.wait_for_function("""async () => {
                 const state = await globalThis.__RENOVATION_OFFLINE_STORE__.read();
                 return state.items.find(item => item.id === 'kitchen-plan-gas')
-                    .orientation === 0 && state.items.length === 179;
+                    .orientation === 0 && state.items.length === 180;
             }""", timeout=15000)
 
             select = page.locator("[data-plan-item-select]")

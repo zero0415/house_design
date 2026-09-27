@@ -5,9 +5,13 @@ import {
 } from "./floorplan.js";
 import { FURNITURE_TEMPLATES } from "./furniture.js";
 import { KITCHEN_SAFETY, renderKitchenReference } from "./kitchen-plan.js";
+import { renderBalconyReference } from "./balcony-plan.js";
 import { OUTLET_POINT_WARNINGS } from "./outlet-diagram.js";
 import { installationQuoteProvenance, quoteProvenance } from "./quote-provenance.js";
-import { conditionalGasDryerWarning, laundryDimensions } from "./laundry-notes.js";
+import {
+    BALCONY_BASIN_WARNING, conditionalGasDryerWarning,
+    isConditionalFloorDryer, isConditionalOutboardSink, laundryDimensions,
+} from "./laundry-notes.js";
 import { objectIconKind } from "./plan-icons.js";
 import {
     catalogType, customEquipment, equipmentCatalog,
@@ -2021,7 +2025,8 @@ function planConflicts() {
         const geometry = roomGeometry(room);
         const center = markerPosition(item, geometry);
         const size = placementFootprint(item, geometry);
-        return !footprintFits(geometry, center.x, center.y, size.width, size.height);
+        return !footprintFits(geometry, center.x, center.y,
+            size.width, size.height, item);
     });
 }
 
@@ -2108,12 +2113,20 @@ function renderVanityWarning(items) {
 
 function renderLaundryWarnings(items) {
     return items.map((item) => {
-        const warning = conditionalGasDryerWarning(item);
+        const basin = isConditionalOutboardSink(item);
+        const floorDryer = isConditionalFloorDryer(item);
+        const warning = basin ? BALCONY_BASIN_WARNING :
+            conditionalGasDryerWarning(item);
         return warning ? `<div class="plan-overlap-alert ac-planning-warning" role="alert"
             data-laundry-warning="${escapeHtml(item.id)}">
-            <strong>瓦斯烘衣機：外推鐵窗毛深約 78cm 與機身深 72.1cm 僅差約 5.9cm；
-                瓦斯排氣、防雨與承重未核，嚴禁據圖施工。</strong>
-            <details class="warning-details"><summary>查看瓦斯、排氣及維修限制</summary>
+            <strong>${basin
+                ? "外推洗衣盆：獨立混凝土支撐／護欄／排水未核，非可施工配置。"
+                : floorDryer
+                    ? "瓦斯烘衣機：陽台左側樓板約81cm僅毛深，拉門逃生、固定燃氣與獨立排氣未核，非可施工配置。"
+                    : "瓦斯烘衣機：外推鐵窗毛深約78cm與機身深72.1cm只差約5.9cm，承重與排氣未核，非可施工配置。"}</strong>
+            <details class="warning-details"><summary>${basin
+                ? "查看盆體承重、給排水及護欄限制"
+                : "查看燃氣、排氣及維修限制"}</summary>
                 <p>${escapeHtml(warning)}</p></details></div>` : "";
     }).join("");
 }
@@ -2188,6 +2201,8 @@ function renderPlanView() {
     const corridorTrack = state.items.find(isTrackLighting);
     const platformDryer = state.items.find((item) =>
         item.furnitureType === "dryer" && item.roomId === "ac-platform");
+    const floorDryer = state.items.find(isConditionalFloorDryer);
+    const platformSink = state.items.find(isConditionalOutboardSink);
     const balconyWasher = state.items.find((item) =>
         item.furnitureType === "washer" && item.roomId === "balcony");
     const conflicts = planConflicts();
@@ -2364,9 +2379,9 @@ function renderPlanView() {
             原報用途曾列<strong>三台冷氣</strong>，
             其他規劃冷氣如有高負載需另核迴路數量；
             原報兩間<strong>暖風機</strong>已改新風機，兩條額度與防潮接線方式須重報。
-            鐵窗上的烘衣機、熱水器、洗碗機或廚下瞬熱飲水器也
+            瓦斯烘衣機（不論在陽台樓板或外推區）、熱水器、洗碗機或廚下瞬熱飲水器也
             <strong>不因圖上已有一般插座就自動取得專用迴路</strong>；
-            設備功率、電壓、專用插頭或固定接線、漏電保護、鐵窗可行性均須確認。
+            設備功率、電壓、專用插頭或固定接線、漏電保護及位置可行性均須確認。
             不可把一般插座當成高功率設備的安全供電保證。</p>
     </details>`;
     const reference = `<details class="plan original-plan">
@@ -2490,21 +2505,23 @@ function renderPlanView() {
                 寬度依原圖標註；陽台後側沒有窗，
                 ${visiblePlanLayers.furniture ? "左側青灰方框是現況泥作水槽" :
                     "左側現況泥作水槽圖示已隨家具隱藏"}
-                （原報價列入拆除，是否保留待確認）。臥室2與客浴右側的淺灰區為
+                （原報價列入拆除，${floorDryer
+                    ? "目前僅擬拆、須核價／許可，尚未拆除" : "是否保留待確認"}）。
+                臥室2與客浴右側的淺灰區為
                 ${state.rooms.some((entry) => entry.id === "corridor")
                     ? "可點選的固定走廊空間" : "走廊"}。</p>
             ${renderDoorMaterialLegend()}
             <p class="plan-disclaimer">臥室3與陽台外側的連續灰藍區是現況圖 U 形外推線，
-                依你的說明標為<strong>外推鐵窗設備暫位</strong>，與陽台室內 2.3㎡ 分開；
+                依圖面標為<strong>外推鐵窗設備暫位</strong>，與陽台室內 2.3㎡ 分開；
                 臥室3後牆仍有原圖 W 窗洞，室外機暫放外側鐵窗，
                 ${platformDryer ? "烘衣機暫放靠陽台一側。" : ""}
+                ${platformSink ? "洗衣盆僅暫標陽台部分外側，須獨立支撐。" : ""}
                 原圖沒有承重、材質、雨淋防護及許可資料，
-                ${platformDryer ? "兩種設備" : "室外機"}能否安裝須現場確認。</p>
+                ${platformDryer || platformSink ? "外推設備" : "室外機"}能否安裝須現場確認。</p>
             <p class="plan-overlap-alert" role="alert">
                 <strong>引用價格與模型不構成可施工配置。</strong>
-                室外冷氣、陽台燈及外推鐵窗上的${platformDryer &&
-                    conditionalGasDryerWarning(platformDryer) ? "瓦斯" : ""}烘衣機須現場核對
-                合法性、承重、排氣、固定、排水、防護與實價；
+                室外冷氣、陽台燈、瓦斯烘衣機與外推洗衣盆須現場核對
+                合法性、承重、燃氣、排氣、固定、排水、防護與實價；
                 客浴浴櫃的圖面標位不表示水管已移；與浴缸、馬桶的
                 實際淨空須現勘核定。</p>
             ${outside ? `<div class="outside-rooms"><strong>另加的房間：</strong>${outside}</div>` : ""}
@@ -2657,8 +2674,8 @@ function renderPlanView() {
         </div>
         <h2>${escapeHtml(room.name)}</h2>
         ${renderACPlanningWarnings(items)}
-        ${renderLaundryWarnings(room.id === "balcony" && platformDryer
-            ? [...items, platformDryer] : items)}
+        ${renderLaundryWarnings(room.id === "balcony"
+            ? [...items, ...[platformDryer, platformSink].filter(Boolean)] : items)}
         ${renderVanityWarning(items)}
         ${diagramLegend}
         ${roomSizeControls}
@@ -2702,11 +2719,16 @@ function renderPlanView() {
         ${room.id === "balcony" ? `<p class="door-legend">陽台後側無窗；
             ${visiblePlanLayers.furniture ? "左側青灰圖示為現況泥作水槽" :
                 "左側現況泥作水槽圖示目前隨家具隱藏"}，
-            水槽已依你要求旋轉 90°；原報價拆除說明列有此物，保留或拆除仍須確認。
+            水槽圖示依舊方案旋轉 90°；原報價拆除說明列有此物，
+            ${floorDryer ? "目前擬拆但尚未拆除，拆除工價與許可待核。" :
+                "保留或拆除仍須確認。"}
             ${balconyWasher
                 ? `洗衣機按 ${escapeHtml(laundryDimensions(balconyWasher))} 暫位於陽台；`
                 : "洗衣機位置尚未標示；"}
-            ${platformDryer ? `${conditionalGasDryerWarning(platformDryer) ? "瓦斯" : ""}烘衣機
+            ${floorDryer ? `瓦斯烘衣機按 ${escapeHtml(laundryDimensions(floorDryer))}
+                條件式暫標於左側原水槽樓板區，前門朝洗衣機；拉門、固定燃氣、
+                排氣與安全間距未核，不能施工。` : platformDryer
+                ? `${conditionalGasDryerWarning(platformDryer) ? "瓦斯" : ""}烘衣機
                 按 ${escapeHtml(laundryDimensions(platformDryer))} 暫標於外推鐵窗陽台側，
                 不能據圖施工；占地不含排氣、維修或承重空間。`
                 : "烘衣機位置以目前圖面為準。"}
@@ -2886,6 +2908,7 @@ function renderPlanView() {
         ${renderLightingAssessment(room)}
         ${room.id === "kitchen" ? `<p class="plan-overlap-alert">${KITCHEN_SAFETY}</p>
             ${renderKitchenReference()}` : ""}
+        ${room.id === "balcony" ? renderBalconyReference() : ""}
         ${mappingPanel}
         <p class="plan-disclaimer">淺色線標的是圖上寬與長；
             ${platform ? "鐵窗外推深度為圖面量繪，並非載重或可用淨距保證" :
@@ -2896,6 +2919,9 @@ function renderPlanView() {
                 .map((item) => escapeHtml(item.name)).join("、")}與牆線或固定設施相交；
             原標位未自動改動，請拖動或現場核對。</p>` : ""}
         <p class="plan-disclaimer">圖示標紅代表物件按現況圖比例及暫填物件尺寸與牆線或固定水槽相交；
+            ${room.id === "balcony" && floorDryer
+                ? "僅標記的烘衣機可在擬拆水槽舊占地討論暫放，紅框不是已拆或安裝核可；其他物件不放寬。"
+                : ""}
             既有儲存位置不會被自動移動。施工前須核對窗、門、梁柱、排水及走道淨距。</p>
         <div class="plan-item-actions">
             <button type="button" data-action="clear-placement"
@@ -2918,7 +2944,9 @@ function renderPlanView() {
             ? "原報價已列「調整馬桶位置」2 支共 4,000 元；是否涵蓋所選位置，以及排水、乾濕分離、門片開啟與尺寸，仍需現場確認。"
             : room.id === "balcony"
                 ? `請確認泥作水槽去留、陽台門淨寬、洗衣機給排水；
-                    ${platformDryer
+                    ${floorDryer
+                        ? "左側樓板瓦斯烘衣機仍僅是有條件暫位，原水槽擬拆未核價；固定燃氣不得軟管跨拉門，獨立室外排氣與逃生淨寬均未核；"
+                        : platformDryer
                         ? `${conditionalGasDryerWarning(platformDryer) ? "選定瓦斯" : "未核型號"}烘衣機
                             僅在鐵窗條件暫位，承重、防雨與排氣尚未核可；` : ""}
                     熱水器的型式、供能與排氣另須核對。商品占地不含安裝或維修淨空。`
@@ -2926,6 +2954,7 @@ function renderPlanView() {
                 ? `臥室3室外機已與室內機連動，不另重複計價；
                     ${platformDryer ? `${conditionalGasDryerWarning(platformDryer)
                         ? "選定瓦斯" : "未核型號"}烘衣機仍只是鐵窗位置暫標。` : ""}
+                    ${platformSink ? "陽台外側洗衣盆須獨立混凝土支撐、合法排水與護欄核可。" : ""}
                     安裝淨空、合法性、承重錨固、防雨防墜、供能排氣、
                     供電及維修動線均待現勘，嚴禁據圖施工。`
             : room.id === "living-dining"
@@ -3078,7 +3107,7 @@ function clampPlacement(item, x, y) {
         return null;
     }
     const center = nearestRoomCenter(geometry, geometry.x + x * geometry.width,
-        geometry.y + y * geometry.height, size.width, size.height);
+        geometry.y + y * geometry.height, size.width, size.height, item);
     if (!center) {
         setStatus("依現況圖比例與已填尺寸，物品放不進房間輪廓或會碰到固定水槽；請核對尺寸或改選位置。", "error");
         return null;
@@ -3094,11 +3123,11 @@ function clampPlacement(item, x, y) {
         };
         if (footprintFits(geometry,
             geometry.x + placement.x * geometry.width,
-            geometry.y + placement.y * geometry.height, size.width, size.height)) {
+            geometry.y + placement.y * geometry.height, size.width, size.height, item)) {
             return placement;
         }
     }
-    if (footprintFits(geometry, center.x, center.y, size.width, size.height)) {
+    if (footprintFits(geometry, center.x, center.y, size.width, size.height, item)) {
         return normalized;
     }
     setStatus("位置四捨五入後超出房間輪廓或固定設施，未儲存本次移動。", "error");

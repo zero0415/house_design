@@ -1312,6 +1312,19 @@ p { margin: 6px 0 10px; }
 .fixed-balcony-sink .sink-bowl { fill: #f8fcfc; stroke: #438590; stroke-width: 1.5; }
 .fixed-balcony-sink .sink-drain { fill: #438590; }
 .fixed-balcony-sink text { fill: #234a53; font-size: 14px; font-weight: 700; }
+.balcony-demolition { pointer-events: none; }
+.balcony-demolition rect { fill: none; stroke: #b42318; stroke-width: 1.5; stroke-dasharray: 4 3; }
+.balcony-demolition text {
+    fill: #b42318; font-size: 8px; paint-order: stroke; stroke: #fff; stroke-width: 2px;
+}
+.conditional-floor-dryer rect { fill: #fff1e5; stroke: #b42318; stroke-width: 1.5; }
+.conditional-floor-dryer circle, .conditional-floor-dryer path {
+    fill: none; stroke: #b42318;
+}
+.conditional-outboard-basin > rect {
+    fill: none; stroke: #b42318; stroke-width: 1.5; stroke-dasharray: 4 3;
+}
+.balcony-conditional .object-icon { stroke: #b42318; }
 .room-marker { cursor: grab; touch-action: none; }
 .room-marker:focus { outline: none; }
 .room-marker:active { cursor: grabbing; }
@@ -1535,6 +1548,36 @@ p { margin: 6px 0 10px; }
 .unknown-depth-tub rect { fill: #edf5f8; stroke: #93631d; stroke-dasharray: 4 3; }
 .unknown-depth-tub text { font-size: 7px; fill: #70501e; stroke: none; }
 .kitchen-reference p { font-size: 13px; line-height: 1.6; }
+.balcony-reference {
+    margin: 12px 0; padding: 12px; border: 1px solid #b5c1c8;
+    font-size: 14px; line-height: 1.6;
+}
+.balcony-reference p { font-size: 14px; }
+.balcony-reference figcaption { font-size: 15px; }
+.balcony-safety-cue { color: var(--true-color-red, #cf222e); font-weight: 600; }
+.balcony-reference-scroll {
+    overflow-x: auto; border: 1px solid #b5c1c8; border-radius: 6px;
+}
+.balcony-reference-scroll:focus-visible, .balcony-safety-details summary:focus-visible {
+    outline: 2px solid var(--color-focus-outline, #0969da); outline-offset: 3px;
+}
+.balcony-reference-svg {
+    display: block; width: 100%; min-width: 650px; background: #fafcfb;
+}
+.balcony-reference-svg text { font-size: 22px; fill: #273b43; font-weight: 700; }
+.balcony-reference-svg .balcony-reference-annotation { font-size: 17px; font-weight: 600; }
+.balcony-reference-floor { fill: #f1f5f7; stroke: #637d89; stroke-width: 3; }
+.balcony-reference-old-sink {
+    fill: none; stroke: #b42318; stroke-width: 3; stroke-dasharray: 8 5;
+}
+.balcony-reference-dryer { fill: #ffe2ce; stroke: #b42318; stroke-width: 3; }
+.balcony-reference-washer { fill: #dceef5; stroke: #467889; stroke-width: 3; }
+.balcony-reference-platform { fill: #eceef0; stroke: #78838a; stroke-width: 2; stroke-dasharray: 8 5; }
+.balcony-reference-basin { fill: #c9e9ef; stroke: #b42318; stroke-width: 3; }
+.balcony-reference-slider { fill: none; stroke: #7c878e; stroke-width: 5; }
+.balcony-reference-direction { fill: none; stroke: #b42318; stroke-width: 3; }
+.balcony-safety-details { margin-top: 8px; }
+.balcony-safety-details summary { cursor: pointer; font-weight: 600; }
 .kitchen-unconfirmed-flue { fill: none; stroke: #a47722; stroke-dasharray: 3 2; }
 .object-icon .icon-sheet,
 .object-icon .icon-appliance,

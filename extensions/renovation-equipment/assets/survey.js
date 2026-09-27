@@ -86,7 +86,7 @@ export function renderSurvey(options, rooms) {
                 ${options.windows ? planWindows.map(windowHighlight).join("") : ""}
                 ${options.doors ? DOOR_HEIGHTS.map(doorHighlight).join("") : ""}
                 ${options.exteriorRail ? `<g class="survey-exterior-rail" role="img"
-                    aria-label="外側 U 形外推輪廓；室外機與烘衣機暫位">
+                    aria-label="外側 U 形外推輪廓；設備暫位以目前格局圖為準">
                     <title>轉繪外推輪廓並作設備暫位；材質、載重及許可均未確認。</title>
                     <path d="${EXTERIOR_PLATFORM_PATH}"/>
                 </g>` : ""}
@@ -98,6 +98,7 @@ export function renderSurvey(options, rooms) {
         <p class="muted survey-note">示意圖含規劃新增隔間；門洞、開向與已報價門片
             請以「格局圖」頁的規劃標示和報價明細對照，不得直接據圖施工。</p>
         <p class="muted survey-note">紫線表示外側的暫定設備區，
-            沒有承重、材質或核准資料，不得推定室外機或烘衣機可安全安裝。</p>
+            沒有承重、材質或核准資料；室外機、洗衣盆或烘衣機的實際可行性
+            仍以現勘與目前規劃圖核對，不得僅憑原圖推定安全安裝。</p>
     </section>`;
 }

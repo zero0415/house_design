@@ -1,6 +1,9 @@
 import { FURNITURE_TEMPLATES } from "./furniture.js";
 import { renderKitchenIcon } from "./kitchen-icons.js";
 import { isUnknownDepthGuestTub } from "./guest-bath-plan.js";
+import {
+    BALCONY_SINK_ID, isConditionalFloorDryer, isConditionalOutboardSink,
+} from "./laundry-notes.js";
 
 const FURNITURE_BY_NAME = new Map(Object.entries(FURNITURE_TEMPLATES)
     .map(([type, template]) => [template.name, type]));
@@ -10,6 +13,7 @@ export function objectIconKind(item) {
     if (item.kind !== "equipment" || item.equipmentType || item.lightType ||
         item.switchType || item.outletCircuit) return null;
     const name = item.name ?? "";
+    if (item.id === BALCONY_SINK_ID) return "basin";
     const furnitureType = FURNITURE_BY_NAME.get(name);
     if (furnitureType) return furnitureType;
     if (item.id === "bath-guest-tub" || /^浴缸(?:（|$)/.test(name)) return "bathtub";
@@ -41,6 +45,29 @@ export function renderObjectIcon(item, width, height) {
                 width="${width}" height="${height}" rx="2"/>
             <text text-anchor="middle" x="7" y="-2">${item.widthCm}cm區段</text>
             <text text-anchor="middle" x="7" y="8">深度未定</text>
+        </g>`;
+    }
+    if (isConditionalFloorDryer(item)) {
+        return `<g class="object-icon conditional-floor-dryer">
+            <title>瓦斯烘衣機僅條件式樓板暫位；前門箭頭隨轉向，通行與排氣未核</title>
+            <rect x="${-width / 2}" y="${-height / 2}" width="${width}"
+                height="${height}" rx="3"/>
+            <circle r="${Math.min(width, height) * .25}"/>
+            <path d="M0 0 V${height * .42}
+                M-4 ${height * .34} L0 ${height * .42} L4 ${height * .34}"/>
+        </g>`;
+    }
+    if (isConditionalOutboardSink(item)) {
+        return `<g class="object-icon conditional-outboard-basin">
+            <title>掛牆洗衣盆僅概念占地；不含櫃體或已確認支架，獨立混凝土錨固待設計</title>
+            <rect x="${-width / 2}" y="${-height / 2}" width="${width}"
+                height="${height}" rx="3"/>
+            <ellipse class="icon-porcelain" cx="0" cy="0"
+                rx="${width * .38}" ry="${height * .38}"/>
+            <ellipse class="icon-basin" cx="0" cy="0"
+                rx="${width * .3}" ry="${height * .28}"/>
+            <circle class="icon-hardware" cx="0" cy="${-height * .22}"
+                r="${Math.min(width, height) * .035}"/>
         </g>`;
     }
     const kitchen = renderKitchenIcon(item, width, height);

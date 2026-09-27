@@ -183,7 +183,7 @@ export function createQuotedOutletItems() {
     return QUOTED_OUTLETS.map((entry) => {
         const hasCircuit = legacyDedicated.some((dedicated) => dedicated.id === entry.id);
         const caution = entry.roomId === "balcony"
-            ? "陽台須確認遮雨、戶外適用防護及漏電保護；此一般插座先對應洗衣機，不代表鐵窗烘衣機已取得專屬迴路。"
+            ? "陽台須確認遮雨、戶外適用防護及漏電保護；此一般插座先對應洗衣機，不代表瓦斯烘衣機已取得專屬迴路。"
             : entry.roomId.startsWith("bath-")
                 ? "浴室馬桶旁僅暫標討論點；濕區距離、漏電保護及免治便座的實際電壓須由合格電工確認。"
                 : "";

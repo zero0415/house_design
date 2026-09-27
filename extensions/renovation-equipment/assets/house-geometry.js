@@ -1,3 +1,5 @@
+import { isConditionalFloorDryer } from "./laundry-notes.js";
+
 // One SVG unit follows the source plan's 1:60 scale at 144 pixels per inch.
 export const PLAN_PIXELS_PER_CM = 2 * 72 / (2.54 * 60);
 export const HOUSE_SIZE = Object.freeze({ width: 945, height: 1980 });
@@ -135,7 +137,7 @@ export function pointInZone(room, x, y) {
     return inside;
 }
 
-export function footprintFits(room, x, y, width, height) {
+export function footprintFits(room, x, y, width, height, item = null) {
     if (!(width > 0 && height > 0)) return false;
     const clearance = 0.75;
     const left = x - width / 2 - clearance;
@@ -144,7 +146,7 @@ export function footprintFits(room, x, y, width, height) {
     const bottom = y + height / 2 + clearance;
     if (left < room.x || right > room.x + room.width ||
         top < room.y || bottom > room.y + room.height) return false;
-    if (room.id === "balcony" &&
+    if (room.id === "balcony" && !isConditionalFloorDryer(item) &&
         left < BALCONY_SINK.x + BALCONY_SINK.width &&
         right > BALCONY_SINK.x &&
         top < BALCONY_SINK.y + BALCONY_SINK.height &&
@@ -158,7 +160,7 @@ export function footprintFits(room, x, y, width, height) {
     return true;
 }
 
-export function nearestRoomCenter(room, x, y, width, height) {
+export function nearestRoomCenter(room, x, y, width, height, item = null) {
     const clearance = 0.75;
     const minX = room.x + width / 2 + clearance;
     const maxX = room.x + room.width - width / 2 - clearance;
@@ -170,7 +172,7 @@ export function nearestRoomCenter(room, x, y, width, height) {
         y: Math.max(minY, Math.min(maxY, cy)),
     });
     const start = keepInsideBounds(x, y);
-    if (footprintFits(room, start.x, start.y, width, height)) return start;
+    if (footprintFits(room, start.x, start.y, width, height, item)) return start;
     for (let radius = 2; radius <= 180 * PLAN_PIXELS_PER_CM; radius += 2) {
         let nearest = null;
         let distance = Infinity;
@@ -180,7 +182,7 @@ export function nearestRoomCenter(room, x, y, width, height) {
                 start.y + radius * Math.sin(angle));
             const candidateDistance = Math.hypot(point.x - x, point.y - y);
             if (candidateDistance < distance &&
-                footprintFits(room, point.x, point.y, width, height)) {
+                footprintFits(room, point.x, point.y, width, height, item)) {
                 nearest = point;
                 distance = candidateDistance;
             }

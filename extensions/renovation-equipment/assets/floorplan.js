@@ -21,7 +21,9 @@ import {
 } from "./socket-plan.js";
 import { isQuotedEquipment } from "./budget.js";
 import { markerQuoteProvenance, quoteProvenance } from "./quote-provenance.js";
-import { laundryMarkerNote } from "./laundry-notes.js";
+import {
+    isConditionalFloorDryer, isConditionalOutboardSink, laundryMarkerNote,
+} from "./laundry-notes.js";
 import { renderLightingPreview } from "./lighting-preview.js";
 import { previewCircuitLinks } from "./circuit-preview.js";
 import { BEDROOM2_PARTITION_ID, BEDROOM2_PARTITION_OPTIONS } from "./partition-options.js";
@@ -715,16 +717,28 @@ function renderBalconySink() {
     </g>`;
 }
 
+function renderBalconyDemolition(items) {
+    if (!items.some(isConditionalFloorDryer)) return "";
+    const { x, y, width, height } = BALCONY_SINK;
+    return `<g class="balcony-demolition" data-demolition-status="proposed" role="img"
+        aria-label="現況泥作水槽擬拆、須核價／許可；舊占地仍保留，尚未拆除">
+        <title>條件式烘衣機重疊歷史水槽占地，不代表水槽已拆或取得施工許可</title>
+        <rect x="${x}" y="${y}" width="${width}" height="${height}"/>
+        <text x="${x}" y="${y - 12}">現況水槽擬拆・須核價／許可</text>
+    </g>`;
+}
+
 function renderExteriorPlatform(detail = false, items = []) {
     const { x, y, width, height } = EXTERIOR_PLATFORM;
     const hasDryer = items.some((item) =>
         item.roomId === "ac-platform" && item.furnitureType === "dryer");
+    const hasSink = items.some(isConditionalOutboardSink);
     const bars = Array.from({ length: Math.floor(width / 35) }, (_, index) =>
         `M${x + (index + 1) * 35} ${y + height - 11} V${y + height}`).join(" ");
     return `<g class="exterior-platform" role="img"
-        aria-label="現況圖外側連續 U 形輪廓；室外機${hasDryer ? "及烘衣機" : ""}討論暫位，鐵窗承重未確認">
+        aria-label="現況圖外側連續 U 形輪廓；室外機${hasDryer ? "及烘衣機" : ""}${hasSink ? "及洗衣盆" : ""}討論暫位，鐵窗承重未確認">
         <title>現況圖外推輪廓跨臥室3及陽台；約 590×78cm 是圖面量繪，
-            圖紙未標示鐵窗材質、承重或許可，尚不可認定能放室外機${hasDryer ? "或烘衣機" : ""}。</title>
+            圖紙未標示鐵窗材質、承重或許可，尚不可認定能放室外機${hasDryer ? "或烘衣機" : ""}${hasSink ? "或洗衣盆；盆體需要獨立可靠混凝土支撐" : ""}。</title>
         <path class="platform-outline"
             d="M${x} ${y} V${y + height} H${x + width} V${y}"/>
         <path class="platform-bars" d="${bars}"/>
@@ -788,11 +802,13 @@ function overviewMarker(item, geometry, name, previewEnabled = false, items = []
     const iconBaseHeight = turned ? iconWidth : iconHeight;
     const previewable = switchOption || downlight || ceilingLight || trackLight;
     const collision = placementFootprint(item, geometry);
-    const invalid = footprintFits(geometry, x, y, collision.width, collision.height)
+    const invalid = footprintFits(geometry, x, y, collision.width, collision.height, item)
         ? "" : " out-of-bounds";
     return `<g class="overview-marker ${className}
         ${!squareLabel && iconKind && item.kind !== "furniture" ? "pictogram" : ""}
-        ${invalid} ${vanity?.conflict ? "fixture-overlap" : ""}"
+        ${invalid} ${vanity?.conflict ? "fixture-overlap" : ""}
+        ${isConditionalFloorDryer(item) || isConditionalOutboardSink(item) ?
+            "balcony-conditional" : ""}"
         transform="translate(${x} ${y})"
         ${quoteMarkerAttributes(source)}
         ${item.outletPlanPointId ? `data-outlet-point-id="${escapeSvg(item.outletPlanPointId)}"` : ""}
@@ -1088,6 +1104,8 @@ export function renderOverviewPlan(rooms, items, showSource = false, activeLight
         ${byRoom.has("corridor") ? "" : `<path class="plan-corridor" d="${CORRIDOR_PATH}"/>
             <path class="plan-corridor-grid" d="${CORRIDOR_PATH}" fill="url(#plan-meter-grid)"/>`}
         ${renderedZones}
+        ${visibleLayers.furniture && byRoom.has("balcony") ?
+            renderBalconyDemolition(items) : ""}
         ${byRoom.has("entry") && byRoom.has("living-dining")
             ? renderEntryLivingPassage(true) : ""}
         ${activeLightIds !== null && visibleLayers.switches && visibleLayers.lights
@@ -1359,7 +1377,8 @@ function detailMarker(item, geometry, selectedItemId, previewEnabled = false,
                 x="${size.width / 2 - 5 * ICON_SCALE}"
                 y="${-size.height / 2 + 6 * ICON_SCALE}">?</text>`}`;
     const collision = placementFootprint(item, geometry);
-    const invalid = !footprintFits(geometry, x, y, collision.width, collision.height);
+    const invalid = !footprintFits(geometry, x, y,
+        collision.width, collision.height, item);
     const rotateHandle = item.kind !== "door" &&
         item.id === selectedItemId && showRotateHandle
         ? `<g class="ac-rotate-handle" data-action="rotate-marker"
@@ -1601,6 +1620,8 @@ export function renderRoomPlan(room, items, selectedItemId, allItems = items,
                 kitchenDrawOrder(a, b))
             .map((item) => detailMarker(item, geometry, selectedItemId,
                 activeLightIds !== null, showRotateHandle, items)).join("")}
+        ${room.id === "balcony" && visibleLayers.furniture ?
+            renderBalconyDemolition(allItems) : ""}
         <g class="detail-scale" transform="translate(${viewX + 22} ${viewY + 40})">
             <path d="M0 0 H${gridSize}
                 M0 -5 V5 M${gridSize} -5 V5"/>

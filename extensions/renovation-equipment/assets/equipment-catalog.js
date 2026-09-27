@@ -162,7 +162,7 @@ export function equipmentFromTemplate(source, roomId, id) {
             : group === "switches" && roomId === "balcony"
                 ? `${reference} 戶外防潮等級、防水盒及施工補差另待電工報價。`
                     : source.furnitureType === "dryer"
-                        ? `${reference} 烘衣機如放鐵窗，承重、防雨、散熱、排氣和新增專用供電均須另核。`
+                        ? `${reference} 烘衣機無論放陽台樓板或鐵窗，固定燃氣、獨立排氣、承重、門淨寬與新增專用供電均須另核。`
                         : source.equipmentType === "fresh-air"
                             ? `${reference} 室外進氣管路及安裝另核，原暖風機額度不隨商品範本複製。`
                             : reference;

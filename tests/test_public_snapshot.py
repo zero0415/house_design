@@ -39,13 +39,13 @@ class PublicSnapshotTests(unittest.TestCase):
                       "26,936", "NT$6,600", "NT$13,200", "1,215",
                       "140,088", "21,032", "GPR-23HI", "4 坪內",
                       "4,684", "967.20", "42,500", "210,612.20",
-                      "59.8", "55", "B06", "5.9cm"):
+                      "59.8", "55", "B06", "81cm", "82×48cm"):
             with self.subTest(value=value):
                 self.assertIn(value, readme)
                 self.assertIn(value, quote)
-        self.assertIn("179 個物件與 28 款商品", readme)
+        self.assertIn("180 個物件與 28 款商品", readme)
         self.assertIn("沒有發布原始工程／電源配置 PDF", readme)
-        self.assertIn("廚房及客浴附件", readme)
+        self.assertIn("廚房／客浴／陽台附件", readme)
         self.assertIn("不自動移入屋內", readme)
         self.assertIn("不自動移入屋內", quote)
         self.assertIn("免治便座、新風機、電熱毛巾架、防滑扶手", readme)
@@ -70,6 +70,10 @@ class PublicSnapshotTests(unittest.TestCase):
             with self.subTest(new=value):
                 self.assertIn(value, quote)
         self.assertIn("私人客浴參考 PNG 未發布", readme)
+        self.assertIn("私人陽台參考 PNG", readme)
+        self.assertIn("非可施工", readme)
+        self.assertIn("不內嵌任何影像", readme)
+        self.assertIn("泥作水槽", quote)
 
     def test_sample_is_deidentified_without_losing_the_plan(self):
         state = json.loads(SAMPLE.read_text(encoding="utf-8"))
@@ -79,11 +83,11 @@ class PublicSnapshotTests(unittest.TestCase):
         self.assertEqual((state["version"], state["revision"], state["undo"]), (5, 0, None))
         self.assertEqual(state["updatedAt"], "2026-01-01T00:00:00.000Z")
         self.assertEqual((len(state["rooms"]), len(state["items"]), len(state["products"])),
-                         (13, 179, 28))
+                         (13, 180, 28))
         rooms = {room["id"] for room in state["rooms"]}
         products = {product["id"] for product in state["products"]}
         self.assertEqual(len(products), 28)
-        self.assertEqual(len({item["id"] for item in state["items"]}), 179)
+        self.assertEqual(len({item["id"] for item in state["items"]}), 180)
         self.assertEqual({room["name"] for room in state["rooms"] if room["id"].startswith(
             "bedroom-")}, {"臥室1", "臥室2", "臥室3"})
         self.assertTrue(all(item["roomId"] in rooms and
@@ -308,7 +312,8 @@ class PublicSnapshotTests(unittest.TestCase):
                                  (product_id, price, width, depth, None))
                 self.assertEqual(products[product_id]["unitPrice"], price)
         self.assertIn("瓦斯", items["balcony-dryer"]["note"])
-        self.assertIn("嚴禁據圖施工", items["balcony-dryer"]["note"])
+        self.assertIn("非可施工配置", items["balcony-dryer"]["note"])
+        self.assertIn("不得據圖施工", items["balcony-dryer"]["note"])
         self.assertIn("淨開口", items["kitchen-plan-dishwasher"]["note"])
         self.assertIn("基本運送", items["kitchen-plan-dishwasher"]["note"])
         b06 = next(item for item in items.values()
@@ -427,7 +432,39 @@ class PublicSnapshotTests(unittest.TestCase):
                              for item in state["items"]))
         self.assertEqual((len(state["rooms"]), len(state["items"]),
                           len(state["products"]), state["revision"], state["undo"]),
-                         (13, 179, 28, 0, None))
+                         (13, 180, 28, 0, None))
+
+    def test_balcony_swap_keeps_old_floor_geometry_and_unpriced_new_basin(self):
+        state = json.loads(SAMPLE.read_text(encoding="utf-8"))
+        items = {item["id"]: item for item in state["items"]}
+        products = {product["id"]: product for product in state["products"]}
+        dryer = items["balcony-dryer"]
+        washer = items["balcony-washer"]
+        heater = items["balcony-water-heater"]
+        sink = items["balcony-outboard-sink"]
+        self.assertEqual((dryer["roomId"], dryer["orientation"],
+                          dryer["productId"], dryer["unitPrice"]),
+                         ("balcony", 270, "sample-product-26", 20599))
+        self.assertAlmostEqual(dryer["placement"]["x"], 35 / 274)
+        self.assertAlmostEqual(dryer["placement"]["y"], 39 / 76)
+        self.assertEqual((washer["placement"], heater["placement"]),
+                         ({"x": .856, "y": .503}, {"x": .979, "y": .518}))
+        self.assertEqual((sink["roomId"], sink["kind"], sink["widthCm"],
+                          sink["depthCm"], sink["heightCm"], sink["unitPrice"],
+                          sink["installationUnitPrice"], sink["productId"],
+                          sink["markerStyle"], sink["equipmentCategory"]),
+                         ("ac-platform", "equipment", 82, 48, None, None,
+                          None, None, None, None))
+        self.assertAlmostEqual(sink["placement"]["x"], 457.32 / 557.04)
+        self.assertEqual(sink["placement"]["y"], .5)
+        self.assertIn("可靠混凝土結構", sink["note"])
+        self.assertIn("不得據圖施工", dryer["note"])
+        self.assertEqual(products["sample-product-26"]["name"],
+                         "Whirlpool 8TWGD5050PW 瓦斯烘衣機（條件式）")
+        self.assertEqual(products["sample-product-26"]["unitPrice"], 20599)
+        self.assertTrue(all(item["note"].count("[balcony-swap:1]") == 1
+                            for item in (dryer, washer, heater, sink)))
+        self.assertIsNone(state["undo"])
 
     def test_offline_bundle_has_only_source_modules(self):
         html = PORTABLE.read_text(encoding="utf-8")
@@ -443,7 +480,8 @@ class PublicSnapshotTests(unittest.TestCase):
         self.assertIn("assets/survey.js", {entry["path"] for entry in bundle["modules"]})
         for name in ("kitchen-plan.js", "kitchen-icons.js", "outlet-diagram.js",
                      "bathroom-installation.js", "laundry-notes.js",
-                     "quote-provenance.js", "guest-bath-plan.js"):
+                     "quote-provenance.js", "guest-bath-plan.js",
+                     "balcony-plan.js"):
             self.assertIn(f"assets/{name}", {entry["path"] for entry in bundle["modules"]})
         for name in ("corridor-plan.js", "air-conditioning-plan.js"):
             self.assertTrue((ROOT / "extensions" / "renovation-equipment" / "assets" /
