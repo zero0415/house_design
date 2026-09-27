@@ -4,6 +4,8 @@ import {
     roomGeometry, windowsForRoom,
 } from "./floorplan.js";
 import { FURNITURE_TEMPLATES } from "./furniture.js";
+import { KITCHEN_SAFETY, renderKitchenReference } from "./kitchen-plan.js";
+import { OUTLET_POINT_WARNINGS } from "./outlet-diagram.js";
 import { objectIconKind } from "./plan-icons.js";
 import {
     catalogType, customEquipment, equipmentCatalog,
@@ -18,6 +20,7 @@ import {
     circuitPlacement, DEDICATED_CIRCUIT_UNIT_PRICE_TWD, isDedicatedCircuit,
     isQuotedCircuit, isQuotedOutlet, isSocket, PLANNER_STATE_VERSION,
     QUOTED_DEDICATED_COUNT, QUOTED_SOCKET_COUNT, SOCKET_UNIT_PRICE_TWD,
+    isWeakCurrent, isPairedSocket, electricalPointCounts,
 } from "./socket-plan.js";
 import { planDisplayCategory } from "./plan-visibility.js";
 import {
@@ -221,7 +224,7 @@ function isPlaceableItem(item) {
         !(isSplitAirConditioner(item) && item.acPlanStatus === "excluded") &&
         !(isSwitch(item) && item.switchPlanStatus === "removed") &&
         (!isQuotedEquipment(item) || isQuotedSwitch(item) ||
-            isQuotedDownlight(item) || isQuotedOutlet(item) || isQuotedCircuit(item));
+            isQuotedDownlight(item) || isQuotedOutlet(item) || isQuotedCircuit(item) || isWeakCurrent(item));
 }
 
 function quotedTrackForDoor(doorId) {
@@ -310,6 +313,7 @@ function renderTotals() {
     const overall = calculatePlanTotal(totals);
     const socketCount = state.items.filter(isSocket).length;
     const circuitCount = state.items.filter(isDedicatedCircuit).length;
+    const points = electricalPointCounts(state.items);
     const foreign = Object.entries(overall.foreignTotals)
         .filter(([, amount]) => amount !== 0)
         .map(([code, amount]) => `${currencySymbols[code]}${currency.format(amount)}`)
@@ -317,6 +321,9 @@ function renderTotals() {
     document.querySelector("#quote-baseline").textContent = `NT$${currency.format(ORIGINAL_QUOTE_TWD)}`;
     document.querySelector("#overall-total").textContent = `NT$${currency.format(overall.TWD)}`;
     document.querySelector("#overall-note").textContent = [
+        points.weak || state.items.some((item) => item.outletPlanPointId)
+            ? `實體電源 ${points.power}（一般 ${points.general}＋已配專用 ${points.dedicated}），` +
+                `另 ${points.weak} 弱電 C 埠（非電源，原報7條×3,000額度不重複追加）。來源標位／電壓仍待現勘` : null,
         foreign ? `另有 ${foreign} 未換算` : null,
         totals.pendingCount ? `${totals.pendingCount} 項價格待補` : null,
         state.items.some((item) => isQuotedSwitch(item) &&
@@ -564,7 +571,7 @@ function field(item, name, label, options = {}) {
                     item.markerStyle !== "square-label")) ||
         (isQuotedOutlet(item) &&
             (name === "quantity" || name === "unit")) ||
-        (isDedicatedCircuit(item) && (name === "quantity" || name === "unit")) ||
+        ((isDedicatedCircuit(item) || isWeakCurrent(item)) && (name === "quantity" || name === "unit")) ||
         (isSplitAirConditioner(item) && (name === "quantity" || name === "unit")) ||
         (isQuotedEquipment(item) &&
             (name === "unit" || name === "brandModel" &&
@@ -804,10 +811,12 @@ function renderItem(item, { displayName = null, circuitNumber = null } = {}) {
         showerDoor ? "玻璃門位｜乾濕分離與防爆膜費用見設備明細" :
             quoted ? `報價已含 NT$${currency.format(item.quotedUnitPrice * item.quotedQuantity)}` : null,
         partition ? `對客廳與走廊共用 ${partitionOption(item).label}` : null,
-        quotedOutlet ? "一般插座 · 原報價 50 個中的一個 · 可拖曳標位" : null,
+        quotedOutlet ? "實體電源 · 原報價 50 個中的一個 · 可拖曳標位" : null,
         item.outletCircuit === "additional-general"
-            ? "新增一般插座 · 每個暫按 NT$1,800 與原報數量對照" : null,
+            ? "新增實體電源 · 每個暫按 NT$1,800 與原報數量對照" : null,
         pairedCircuit ? `已配「${pairedCircuit.name}」` : null,
+        isWeakCurrent(item) ? "弱電 C 埠 · 非電源插座 · 原報弱電7條額度之一，不重複追加" : null,
+        item.outletPlanPointId ? `來源標位 ${item.outletPlanPointId}（位置配準待核）` : null,
         circuit ? `專用迴路 · 對應「${linkedSocket?.name ?? "插座待核"}」 ·
             ${quotedCircuit ? "原報 7 條之一" : "另列追加"} · 可拖曳標位` : null,
         switchItem ? removedSwitch ? "原報開關已從規劃移除 · 暫估減項待核" :
@@ -1114,10 +1123,12 @@ function renderRoomView() {
 function socketListName(item) {
     if (!isSocket(item)) throw new TypeError("只有插座可列在一般插座清單。");
     const name = item.name.replace(/^新增(?=一般插座)/, "").trim();
+    if (item.outletPlanPointId) return name;
     return name.startsWith("一般插座") ? name : `一般插座－${name}`;
 }
 
 function placedItemGroup(item) {
+    if (isWeakCurrent(item)) return { key: "weak-current", title: "弱電／網路 C 埠（非電源）" };
     const lightNames = { ceiling: "吸頂燈", recessed: "崁燈", track: "軌道燈組" };
     if (item.lightType && lightNames[item.lightType]) {
         return { key: `light:${item.lightType}`, title: lightNames[item.lightType] };
@@ -1167,8 +1178,10 @@ function renderDeviceView() {
     }
     const socketGroup = sockets.length ? `<details class="device-group grouped-device-group"
         data-device-group="sockets" ${openDeviceGroups.has("sockets") ? "open" : ""}>
-        <summary class="group-head"><strong class="device-group-title">一般插座</strong>
+        <summary class="group-head"><strong class="device-group-title">實體電源插座</strong>
             <span class="room-count">已放置 ${sockets.length} 個 ·
+                一般 ${sockets.filter((item) => !isPairedSocket(item, state.items)).length} ·
+                已配專用 ${sockets.filter((item) => isPairedSocket(item, state.items)).length} ·
                 規劃總數 ${state.items.filter(isSocket).length} 個</span></summary>
         <p class="muted">原報價按 50 個 × NT$1,800 計算；目前總數若非 50 個，
             增減單價與點位須再確認。最後需要多少個插座、多少條迴路，
@@ -1182,7 +1195,7 @@ function renderDeviceView() {
         <summary class="group-head"><strong class="device-group-title">專用迴路</strong>
             <span class="room-count">已放置 ${circuits.length} 條 ·
                 規劃總數 ${state.items.filter(isDedicatedCircuit).length} 條</span></summary>
-        <p class="muted">每條迴路對應下列一個一般插座；原報價為 7 條 × NT$4,500。
+        <p class="muted">每條迴路對應下列一個實體供電端點，不是另一顆插座；原報價為 7 條 × NT$4,500。
             最後共需幾條迴路、配電容量及跳電風險仍須請電工確認，
             建議至少維持 7 條。此處編號只是清單順序，不是已核定的電路編號。</p>
         ${circuits.map((item, index) => {
@@ -1977,6 +1990,25 @@ function renderPlanView() {
         item.id === "quoted-switch-12" && item.switchPlanStatus !== "removed");
     const sockets = state.items.filter(isSocket);
     const circuits = state.items.filter(isDedicatedCircuit);
+    const pointWarnings = state.items.filter((item) =>
+        (!room || item.roomId === room.id) && OUTLET_POINT_WARNINGS[item.outletPlanPointId]);
+    const diagramWarnings = pointWarnings.length
+        ? `<div class="plan-overlap-alert outlet-point-warnings" role="alert">
+            <strong>保留來源原標位｜衝突待現場核對，非可施工配置</strong>
+            ${pointWarnings.map((item) => `<p data-point-warning="${escapeHtml(item.outletPlanPointId)}">
+                <strong>${escapeHtml(item.outletPlanPointId)}</strong>：
+                ${OUTLET_POINT_WARNINGS[item.outletPlanPointId]}</p>`).join("")}</div>` : "";
+    const diagramLegend = state.items.some((item) => item.outletPlanPointId)
+        ? `<p class="outlet-diagram-legend"><strong>去識別化來源標位：</strong>
+            <span class="diagram-key general">R 紅：一般電源</span>
+            <span class="diagram-key dedicated">B 黑：獨立實體專用供電</span>
+            <span class="diagram-key weak">C 綠：弱電／網路，非電源</span>。
+            R/B 是不同實體端點；紫色「迴」另表配線，不是另一顆插座。
+            顏色沿用來源分類，後續實際配對見迴路清單；點位與房間配準仍待現勘。
+            來源方案為 51R＋9B＝60 電源、9 迴路、另 7C；
+            比原報 50 電源／7 迴路的數量差額為 <strong>NT$27,000</strong>，
+            不等於相對先前存檔的總價差。弱電 7 條×3,000 已含原報，不再加 21,000。
+            110V／220V 僅來源標註，接頭、負載、戶外／濕區防護及安裝補差待核。</p>${diagramWarnings}` : "";
     const quotedOutlets = sockets.filter(isQuotedOutlet);
     const addedOutlets = sockets.filter((item) =>
         item.outletCircuit === "additional-general");
@@ -1996,7 +2028,7 @@ function renderPlanView() {
                 title="${layer === "furniture"
                     ? "家具含所有非燈、開關、插座物件：衛浴設備、冷氣室內外機及現況水槽；門窗和牆不隱藏" :
                     layer === "outlets"
-                        ? "插座圖層含一般插座及已配對的專用迴路；隱藏只影響圖面，不變更原報價"
+                        ? "插座圖層含實體電源、專用迴路及弱電 C 埠；隱藏只影響圖面，不變更原報價"
                         : "僅隱藏圖上的標記，不變更設備或價格"}"
                 >${visible ? "隱藏" : "顯示"}${layerLabels[layer]}</button>`
         ).join("")}
@@ -2006,7 +2038,7 @@ function renderPlanView() {
     const visibilityNote = hiddenLayers.length
         ? `<p class="plan-disclaimer">已隱藏${hiddenLayers.join("、")}圖示；
             家具包含除燈、開關與插座以外的物件，例如衛浴設備、
-            冷氣室內／室外機、家電及現況水槽；插座與專用迴路可一起隱藏，
+            冷氣室內／室外機、家電及現況水槽；電源、專用迴路與弱電 C 埠可一起隱藏，
             門、窗、牆與玻璃隔屏仍顯示。
             隱藏不會刪除物件、改價或關燈；
             隱藏燈或開關時，對應虛線也暫不顯示。</p>` : "";
@@ -2069,7 +2101,9 @@ function renderPlanView() {
         }).join("") || "<li>本空間目前沒有已標位的開關對應。</li>"}</ul>
     </details>` : "";
     const socketLegend = `<p class="door-legend">
-        <span class="outlet-key">座</span>每個為一顆實體一般插座；
+        ${state.items.some((item) => item.outletPlanPointId)
+            ? "紅 R 與黑 B 各代表一顆獨立的實體電源；綠 C 是弱電埠而非電源。"
+            : '<span class="outlet-key">座</span>每個為一顆實體電源插座；'}
         <span class="circuit-key">迴</span>為另外計價、明確配對一顆插座的專用迴路，
         紫色虛線僅表示對應，不是實際配線路徑。
         目前 ${sockets.length} 顆插座（其中原報名額 ${quotedOutlets.length} 顆、
@@ -2080,7 +2114,7 @@ function renderPlanView() {
         NT$${currency.format(DEDICATED_CIRCUIT_UNIT_PRICE_TWD)}＝NT$${currency.format(
             QUOTED_DEDICATED_COUNT * DEDICATED_CIRCUIT_UNIT_PRICE_TWD)}，
         均已含於原工程總價，不能重複追加。<strong>圖示中心僅表示用電區域；
-        牆面高度、電壓及實際線路待電工確認</strong>。</p>`;
+        牆面高度、電壓及實際線路待電工確認</strong>。</p>${diagramLegend}`;
     const socketAlerts = [
         sockets.length !== QUOTED_SOCKET_COUNT
             ? `插座目前 ${sockets.length} 個，與原報 ${QUOTED_SOCKET_COUNT} 個不符；
@@ -2102,7 +2136,7 @@ function renderPlanView() {
             [...sockets, ...circuits].some((item) => item.roomId === entry.id)).map((entry) => {
             const roomSockets = sockets.filter((item) => item.roomId === entry.id);
             const roomCircuits = circuits.filter((item) => item.roomId === entry.id);
-            return `<span>${escapeHtml(entry.name)}：${roomSockets.length} 個一般插座、
+            return `<span>${escapeHtml(entry.name)}：${roomSockets.length} 個實體電源、
                 ${roomCircuits.length} 條專用迴路</span>`;
         }).join("")}</div>
         <p>目前迴路各自配對：
@@ -2382,16 +2416,17 @@ function renderPlanView() {
             ${sourceToggle}
         </div>
         <h2>${escapeHtml(room.name)}</h2>
+        ${diagramLegend}
         ${roomSizeControls}
         ${roomOutlets.length || roomCircuits.length ? `<p class="door-legend">
-            此房已列 <strong>${roomOutlets.length} 個一般插座、
+            此房已列 <strong>${roomOutlets.length} 個實體電源插座、
                 ${roomCircuits.length} 條專用迴路</strong>；
-            每條迴路只能對應一個插座，紫色「迴」與藍色插孔是不同物件。
+            每條迴路只能對應一個插座，紫色「迴」與實體電源標記是不同物件。
             插座可直接刪減；已配迴路者請先改綁或刪除迴路。
             原報全屋 50 個 × NT$1,800 及 7 條 × NT$4,500 的基準仍保留，
             規劃差額與高負載跳電風險須電工核對。</p>` : ""}
         ${roomAddedOutlets.length ? `<p class="plan-overlap-alert">
-            本房另新增 ${roomAddedOutlets.length} 個一般插座；
+            本房另新增 ${roomAddedOutlets.length} 個實體電源插座；
             插座按每個 NT$1,800 暫估，專用迴路須另建並配對。
             若全屋實際數量與原報 50 個不同，施工及扣價需重新核對。
         </p>` : ""}
@@ -2597,6 +2632,8 @@ function renderPlanView() {
                 !rotateHandleHidden, lightingPlaneCm)}
         ${lightingLegend}
         ${renderLightingAssessment(room)}
+        ${room.id === "kitchen" ? `<p class="plan-overlap-alert">${KITCHEN_SAFETY}</p>
+            ${renderKitchenReference()}` : ""}
         ${mappingPanel}
         <p class="plan-disclaimer">淺色線標的是圖上寬與長；
             ${platform ? "鐵窗外推深度為圖面量繪，並非載重或可用淨距保證" :
@@ -4592,7 +4629,9 @@ function addFurniture(type, position) {
         unitPrice: null,
         priceCurrency: "TWD",
         priceSource: "",
-        note: type === "refrigerator"
+        note: type.startsWith("kitchen-")
+            ? `廚房圖例尺寸為暫估，型號與價格待報。${KITCHEN_SAFETY}`
+            : type === "refrigerator"
             ? "冰箱暫按 70×70cm 占地；機型、實際尺寸、開門方向、供電與走道淨距待確認。"
             : type === "television"
                 ? "壁掛電視暫按 120×10cm 占地；安裝、插座、弱電及實際尺寸待確認。弱電配置列電視線不代表電視本體已報價。"

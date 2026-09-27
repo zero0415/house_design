@@ -7,6 +7,7 @@ import { roomGeometry } from "./floorplan.js";
 import {
     isDedicatedCircuit, PLANNER_STATE_VERSION, SOCKET_PLAN_VERSION,
     upgradeLegacySocketPlan,
+    isWeakCurrent, isPairedSocket,
 } from "./socket-plan.js";
 import { upgradeLegacyLightingState } from "./lighting-options.js";
 import { lightDataStatus } from "./lighting-preview.js";
@@ -89,6 +90,7 @@ const CSV_COLUMNS = Object.freeze([
     "室外機窗位（示意）", "室外機暫估尺寸（cm）", "價格來源", "備註",
     "天花淨高（cm）", "每盞瓦數（W）", "每盞光通量（lm）",
     "光束角（度）", "光學資料來源", "照度資料待補",
+    "來源標位 ID", "標位類型（示意，非施工核可）",
 ]);
 
 export function itemListCsv(state) {
@@ -108,7 +110,9 @@ export function itemListCsv(state) {
         const quote = isQuotedEquipment(item);
         return [
             rooms.get(item.roomId).name,
-            isDedicatedCircuit(item) ? "專用迴路" :
+            isWeakCurrent(item) ? "弱電 C 埠（非電源）" :
+            isDedicatedCircuit(item) ? "專用迴路（非實體端點）" :
+                isPairedSocket(item, state.items) ? "專用實體電源" :
                 ({ furniture: "家具／其他", lights: "燈", switches: "開關",
                     outlets: "插座", structure: "門牆" })[planDisplayCategory(item)],
             item.name, item.brandModel, item.quantity ?? "待補", item.unit,
@@ -133,6 +137,9 @@ export function itemListCsv(state) {
             item.lightType ? item.lightSpecSource ?? "" : "",
             item.lightType ? lightDataStatus(item,
                 roomGeometry(rooms.get(item.roomId))).missing.join("、") : "",
+            item.outletPlanPointId ?? "",
+            item.outletPlanPointId ? ({ R: "一般電源", B: "專用供電端點", C: "弱電非電源" })[
+                item.outletPlanPointId[0]] : "",
         ].map(csvCell).join(",");
     });
     return "\ufeff" + [CSV_COLUMNS.map(csvCell).join(","), ...rows].join("\r\n") + "\r\n";

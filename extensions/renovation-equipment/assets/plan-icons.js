@@ -1,4 +1,5 @@
 import { FURNITURE_TEMPLATES } from "./furniture.js";
+import { renderKitchenIcon } from "./kitchen-icons.js";
 
 const FURNITURE_BY_NAME = new Map(Object.entries(FURNITURE_TEMPLATES)
     .map(([type, template]) => [template.name, type]));
@@ -31,6 +32,8 @@ export function renderObjectIcon(item, width, height) {
     if (!(Number.isFinite(width) && width > 0 && Number.isFinite(height) && height > 0)) {
         throw new RangeError("物件圖示缺少有效的占地寬深。");
     }
+    const kitchen = renderKitchenIcon(item, width, height);
+    if (kitchen) return kitchen;
     const w = width;
     const h = height;
     const m = Math.max(1, Math.min(w, h) * 0.07);

@@ -4,6 +4,26 @@ export const SOCKET_UNIT_PRICE_TWD = 1800;
 export const DEDICATED_CIRCUIT_UNIT_PRICE_TWD = 4500;
 export const SOCKET_PLAN_VERSION = 2;
 export const PLANNER_STATE_VERSION = 5;
+export const WEAK_CURRENT_UNIT_PRICE_TWD = 3000;
+export const QUOTED_WEAK_CURRENT_IDS = Object.freeze(
+    Array.from({ length: 7 }, (_, index) => `weak-outlet-C0${index + 1}`));
+
+export function isWeakCurrent(item) {
+    return item?.kind === "equipment" && item.equipmentType === "weak-current";
+}
+
+export function isPairedSocket(item, items) {
+    return isSocket(item) && items.some((entry) =>
+        isDedicatedCircuit(entry) && entry.circuitOutletId === item.id);
+}
+
+export function electricalPointCounts(items) {
+    const sockets = items.filter(isSocket);
+    const dedicated = sockets.filter((item) => isPairedSocket(item, items)).length;
+    return { power: sockets.length, general: sockets.length - dedicated, dedicated,
+        circuits: items.filter(isDedicatedCircuit).length,
+        weak: items.filter(isWeakCurrent).length };
+}
 
 const dedicated = [
     ["outlet-master-ac", "master", "主臥冷氣", .82, .29,

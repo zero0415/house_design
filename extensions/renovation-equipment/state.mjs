@@ -17,6 +17,7 @@ import {
     PLANNER_STATE_VERSION, QUOTED_CIRCUIT_BY_ID, QUOTED_OUTLET_BY_ID,
     SOCKET_PLAN_VERSION, SOCKET_UNIT_PRICE_TWD, DEDICATED_CIRCUIT_UNIT_PRICE_TWD,
     upgradeLegacySocketPlan,
+    isWeakCurrent, QUOTED_WEAK_CURRENT_IDS, WEAK_CURRENT_UNIT_PRICE_TWD,
 } from "./assets/socket-plan.js";
 import {
     DOWNLIGHT_QUOTED_UNIT_PRICE_TWD, QUOTED_DOWNLIGHTS,
@@ -811,6 +812,7 @@ export function validateState(data) {
         return { id, name, widthCm, depthCm, dimensionStatus, ceilingHeightCm };
     });
     const itemIds = new Set();
+    const diagramPointIds = new Set();
     const items = data.items.map((item) => {
         const id = requiredText(item?.id, "設備識別碼", 80);
         if (!ID.test(id) || itemIds.has(id)) {
@@ -901,8 +903,9 @@ export function validateState(data) {
         const quotedCircuit = QUOTED_CIRCUIT_BY_ID.get(id);
         const circuit = Boolean(quotedCircuit) ||
             item.equipmentType === "dedicated-circuit";
+        const weak = isWeakCurrent(item);
         const equipmentType = freshAirRoom || rinseKitRoom ||
-            towelRailRoom || grabBar || circuit ? item.equipmentType ?? null : null;
+            towelRailRoom || grabBar || circuit || weak ? item.equipmentType ?? null : null;
         const legacyFanInstall = id.endsWith("-heater-install") &&
             item.name === "暖風機安裝" &&
             item.brandModel === "暖風機安裝（機器自備）";
@@ -932,6 +935,24 @@ export function validateState(data) {
         }
         const additionalOutlet = !quotedOutlet &&
             item.outletCircuit === "additional-general";
+        const outletPlanPointId = item.outletPlanPointId ?? null;
+        if (outletPlanPointId !== null && (typeof outletPlanPointId !== "string" ||
+            !/^(R(?:0[1-9]|[1-4][0-9]|5[01])|B0[1-9]|C0[1-7])$/.test(outletPlanPointId) ||
+            diagramPointIds.has(outletPlanPointId) ||
+            (weak ? outletPlanPointId !== id.replace("weak-outlet-", "") :
+                !isSocket(item) || outletPlanPointId.startsWith("C")))) {
+            throw new StoreError(400, "來源標位識別碼須唯一且與電源／弱電類型相符。");
+        }
+        if (outletPlanPointId !== null) diagramPointIds.add(outletPlanPointId);
+        if (weak && (!QUOTED_WEAK_CURRENT_IDS.includes(id) || outletPlanPointId === null ||
+            item.quantity !== 1 || item.unit !== "個" || itemCurrency !== "TWD" ||
+            item.outletCircuit != null || item.circuitOutletId != null ||
+            item.productId != null || item.lightType != null || item.switchType != null ||
+            item.widthCm != null || item.depthCm != null || item.heightCm != null ||
+            equipmentCategory !== "outlets" || markerStyle !== "square-label" ||
+            item.quotedUnitPrice !== WEAK_CURRENT_UNIT_PRICE_TWD || item.quotedQuantity !== 1)) {
+            throw new StoreError(400, "弱電 C 埠不是電源插座；須保留原報 7 條每條 NT$3,000 基準。");
+        }
         const outletCircuit = quotedOutlet || additionalOutlet
             ? item.outletCircuit ?? null : null;
         if (quotedOutlet && (kind !== "equipment" || itemCurrency !== "TWD" ||
@@ -1001,7 +1022,7 @@ export function validateState(data) {
             throw new StoreError(400, "浴缸防滑扶手須列在客浴牆面，位置與方向可調整。");
         }
         if (!freshAirRoom && !rinseKitRoom && !towelRailRoom &&
-            !grabBar && !circuit && item.equipmentType != null) {
+            !grabBar && !circuit && !weak && item.equipmentType != null) {
             throw new StoreError(400, "此設備不能使用固定衛浴設備的圖示類型。");
         }
         if (quotedTrack && (kind !== "equipment" || roomId !== quotedTrack.roomId ||
@@ -1121,7 +1142,7 @@ export function validateState(data) {
         if (equipmentCategory !== null &&
             (equipmentCategory === "lights" ? !genericLight :
                 equipmentCategory === "switches" ? switchType === null :
-                    equipmentCategory === "outlets" ? !additionalOutlet :
+                    equipmentCategory === "outlets" ? !additionalOutlet && !weak :
                         item.lightType != null || switchType !== null ||
                             item.outletCircuit != null)) {
             throw new StoreError(400, "自行新增商品的類別與開關、插座或燈具規格不一致。");
@@ -1187,7 +1208,7 @@ export function validateState(data) {
             throw new StoreError(400, "只有門位可以設定額外滑門軌道長度。");
         }
         const quoted = kind === "door" ||
-            Boolean(bathroomQuote || quotedTrack || quotedPartition || quotedSwitch ||
+            Boolean(weak || bathroomQuote || quotedTrack || quotedPartition || quotedSwitch ||
                 quotedOutlet || quotedCircuit || quotedDownlight);
         if (!quoted && (item.quotedUnitPrice != null || item.quotedQuantity != null)) {
             throw new StoreError(400, "未列原報價的物件不可設定報價基準。");
@@ -1316,6 +1337,7 @@ export function validateState(data) {
             switchEnvironment,
             switchPlanStatus,
             outletCircuit,
+            ...(outletPlanPointId === null ? {} : { outletPlanPointId }),
             circuitOutletId,
             productId,
             equipmentCategory,

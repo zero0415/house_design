@@ -1421,6 +1421,36 @@ p { margin: 6px 0 10px; }
 }
 .room-marker .object-inline-label { font-size: 15px; }
 .object-icon { pointer-events: none; }
+.diagram-point { pointer-events: none; }
+.diagram-point .icon-diagram { stroke: #fff; stroke-width: .6; }
+.diagram-general .icon-diagram { fill: #b52e32; }
+.diagram-dedicated .icon-diagram { fill: #20252d; }
+.diagram-weak .icon-diagram { fill: #177748; }
+.diagram-point .diagram-point-label { fill: #fff; font-weight: 600; stroke: none; }
+.diagram-point .diagram-warning-ring { fill: none; stroke: #bf7800; stroke-width: 1; stroke-dasharray: 2 1; }
+.outlet-diagram-legend { padding: 10px; border: 1px solid #a7b8c4; }
+.diagram-key { padding: 2px 5px; color: white; border-radius: 3px; white-space: nowrap; }
+.diagram-key.general { background: #b52e32; }
+.diagram-key.dedicated { background: #20252d; }
+.diagram-key.weak { background: #177748; }
+.kitchen-icon .kitchen-outline, .kitchen-reference .kitchen-reference-top {
+    fill: #edf2ef; stroke: #546d6e; stroke-width: 1;
+}
+.kitchen-icon .kitchen-base, .kitchen-reference .kitchen-reference-front {
+    fill: #e6d7bd; stroke: #876d49; stroke-width: 1;
+}
+.kitchen-icon .kitchen-under { fill: none; stroke-dasharray: 3 2; }
+.kitchen-overhead { fill: #d6dfe7; stroke: #526e87; stroke-width: 1; }
+.kitchen-ring { fill: none; stroke: #435968; stroke-width: 1; }
+.kitchen-water { fill: #c5e0e8; stroke: #688f9e; stroke-width: 1; }
+.kitchen-icon .kitchen-label {
+    fill: #263c45; stroke: none; font-weight: 600;
+}
+.kitchen-reference { margin-block: 12px; padding: 12px; border: 1px solid #b5c1c8; }
+.kitchen-reference svg { display: block; width: min(100%, 620px); margin: auto; }
+.kitchen-reference svg text { font-size: 8px; text-anchor: middle; fill: #263c45; }
+.kitchen-reference p { font-size: 13px; line-height: 1.6; }
+.kitchen-unconfirmed-flue { fill: none; stroke: #a47722; stroke-dasharray: 3 2; }
 .object-icon .icon-sheet,
 .object-icon .icon-appliance,
 .object-icon .icon-porcelain {

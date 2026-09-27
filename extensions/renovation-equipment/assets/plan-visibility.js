@@ -1,4 +1,4 @@
-import { isDedicatedCircuit } from "./socket-plan.js";
+import { isDedicatedCircuit, isWeakCurrent } from "./socket-plan.js";
 
 export function planDisplayCategory(item) {
     if (!item || typeof item !== "object") {
@@ -7,7 +7,7 @@ export function planDisplayCategory(item) {
     if (item.kind === "door") return "structure";
     if (item.lightType != null) return "lights";
     if (item.switchType != null) return "switches";
-    if (item.outletCircuit != null || isDedicatedCircuit(item)) return "outlets";
+    if (item.outletCircuit != null || isDedicatedCircuit(item) || isWeakCurrent(item)) return "outlets";
     if (item.equipmentCategory != null) return item.equipmentCategory;
     const name = typeof item.name === "string" ? item.name : "";
     if (/插座|電源插孔/.test(name)) return "outlets";

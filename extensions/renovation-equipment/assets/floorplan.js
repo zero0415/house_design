@@ -10,9 +10,11 @@ import {
 } from "./bathroom-fixtures.js";
 import { CORRIDOR_TRACK_LENGTH_CM } from "./track-lighting.js";
 import { objectIconKind, renderObjectIcon } from "./plan-icons.js";
+import { kitchenDrawOrder } from "./kitchen-icons.js";
+import { diagramPointSymbol } from "./outlet-diagram.js";
 import { planDisplayCategory } from "./plan-visibility.js";
 import {
-    isDedicatedCircuit, isQuotedOutlet, isSocket,
+    isDedicatedCircuit, isQuotedOutlet, isSocket, isWeakCurrent,
 } from "./socket-plan.js";
 import { isQuotedEquipment } from "./budget.js";
 import { renderLightingPreview } from "./lighting-preview.js";
@@ -241,6 +243,7 @@ function renderEntryLivingPassage(overview) {
 
 export function itemFootprint(item, geometry) {
     if (item.kind === "door") return null;
+    if (item.outletPlanPointId) return { width: 12, height: 12 };
     if (planDisplayCategory(item) === "outlets") return { width: 18, height: 18 };
     if (isFreshAirUnit(item)) {
         return [90, 270].includes(item.orientation)
@@ -622,7 +625,7 @@ function overviewMarker(item, geometry, name, previewEnabled = false) {
     const { x, y } = markerPosition(item, geometry);
     const { width, height } = itemFootprint(item, geometry);
     const circuit = isDedicatedCircuit(item);
-    const socket = !circuit && planDisplayCategory(item) === "outlets";
+    const socket = !circuit && !isWeakCurrent(item) && planDisplayCategory(item) === "outlets";
     const airConditioner = !socket && !circuit &&
         (isSplitAirConditioner(item) || item.name.includes("冷氣"));
     const wallHeater = isBalconyHeaterPlaceholder(item);
@@ -673,6 +676,7 @@ function overviewMarker(item, geometry, name, previewEnabled = false) {
         ${!squareLabel && iconKind && item.kind !== "furniture" ? "pictogram" : ""}
         ${invalid}"
         transform="translate(${x} ${y})"
+        ${item.outletPlanPointId ? `data-outlet-point-id="${escapeSvg(item.outletPlanPointId)}"` : ""}
         ${previewEnabled && previewable ? `data-preview-item-id="${escapeSvg(item.id)}"
             role="button" tabindex="0" aria-label="切換${escapeSvg(item.name)}的模擬照明"` : ""}>
         <title>${escapeSvg(name)}：${escapeSvg(item.name)}
@@ -690,7 +694,7 @@ function overviewMarker(item, geometry, name, previewEnabled = false) {
                     downlight ? "，天花崁燈示意（含燈具、配線及安裝）" :
                         ceilingLight ? "，天花吸頂燈示意（商品與安裝分列；實價待核）" :
                             trackLight ? `，150cm軌道及${item.spotlightQuantity}盞軌道燈示意，配線安裝另計` : ""}</title>
-        ${squareLabel ? `${trackLight ? `<path class="square-track-extent"
+        ${item.outletPlanPointId ? diagramPointSymbol(item) : squareLabel ? `${trackLight ? `<path class="square-track-extent"
                 d="M0 ${-item.trackLengthCm * (geometry.cmScale ??
                     PLAN_PIXELS_PER_CM) / 2} V${item.trackLengthCm *
                     (geometry.cmScale ?? PLAN_PIXELS_PER_CM) / 2}"
@@ -862,6 +866,8 @@ export function renderOverviewPlan(rooms, items, showSource = false, activeLight
         const markers = roomItems.filter((item) =>
             item.kind !== "door" && item.placement && markerVisible(item, visibleLayers) &&
             (!isSplitAirConditioner(item) || isActiveSplitAirConditioner(item)))
+            .sort((a, b) => Boolean(a.outletPlanPointId) - Boolean(b.outletPlanPointId) ||
+                kitchenDrawOrder(a, b))
             .map((item) => overviewMarker(item, geometry, room.name,
                 activeLightIds !== null)).join("");
         return `<g class="plan-zone tone-${zone.tone}" data-select-room="${zone.id}"
@@ -1005,7 +1011,7 @@ function detailMarker(item, geometry, selectedItemId, previewEnabled = false,
     const iconKind = objectIconKind(item);
     const nativeFurniture = FURNITURE_TEMPLATES[iconKind] ?? null;
     const circuit = isDedicatedCircuit(item);
-    const socket = !circuit && planDisplayCategory(item) === "outlets";
+    const socket = !circuit && !isWeakCurrent(item) && planDisplayCategory(item) === "outlets";
     const airConditioner = !socket && !circuit &&
         (isSplitAirConditioner(item) || item.name.includes("冷氣"));
     const wallHeater = isBalconyHeaterPlaceholder(item);
@@ -1042,7 +1048,7 @@ function detailMarker(item, geometry, selectedItemId, previewEnabled = false,
         item.name.includes("淋浴") ? "淋浴" :
             item.name.slice(0, measured && size.width >= 62 ? 4 : 2);
     const squareSize = Math.max(18, Math.min(30, footprint.width, footprint.height));
-    const symbol = squareLabel
+    const symbol = item.outletPlanPointId ? diagramPointSymbol(item) : squareLabel
         ? `${trackLight ? `<path class="square-track-extent"
                 d="M0 ${-item.trackLengthCm * (geometry.cmScale ??
                     PLAN_PIXELS_PER_CM) / 2} V${item.trackLengthCm *
@@ -1207,6 +1213,7 @@ function detailMarker(item, geometry, selectedItemId, previewEnabled = false,
             ${!squareLabel && iconKind && !furniture ? "pictogram" : ""}
             ${invalid ? "out-of-bounds" : ""} ${item.id === selectedItemId ? "selected" : ""}"
             data-marker-id="${escapeSvg(item.id)}" role="button" tabindex="0"
+            ${item.outletPlanPointId ? `data-outlet-point-id="${escapeSvg(item.outletPlanPointId)}"` : ""}
             aria-label="${previewEnabled && (switchOption || downlight ||
                 ceilingLight || trackLight) ? "切換模擬照明：" : "拖動"}
                 ${escapeSvg(item.name)}${previewEnabled && (switchOption || downlight ||
@@ -1221,7 +1228,7 @@ function detailMarker(item, geometry, selectedItemId, previewEnabled = false,
                     circuit ? `，獨立專用迴路，配對插座 ID
                         ${escapeSvg(item.circuitOutletId)}；負載與跳電風險待電工核對` :
                     socket ? `，${isQuotedOutlet(item)
-                        ? "原報價一般插座；專用迴路若有另列一筆"
+                        ? "原報價實體電源；專用迴路若有另列一筆"
                         : "新增一般插座暫估 NT$1,800；專用迴路另列"}` :
                     downlight ? "，天花崁燈位置示意" :
                         ceilingLight ? "，客廳天花吸頂燈位置示意" :
@@ -1403,6 +1410,8 @@ export function renderRoomPlan(room, items, selectedItemId, allItems = items,
         ${items.filter((item) => item.kind !== "door" && item.placement &&
             markerVisible(item, visibleLayers) &&
             (!isSplitAirConditioner(item) || isActiveSplitAirConditioner(item)))
+            .sort((a, b) => Boolean(a.outletPlanPointId) - Boolean(b.outletPlanPointId) ||
+                kitchenDrawOrder(a, b))
             .map((item) => detailMarker(item, geometry, selectedItemId,
                 activeLightIds !== null, showRotateHandle)).join("")}
         <g class="detail-scale" transform="translate(${viewX + 22} ${viewY + 40})">
