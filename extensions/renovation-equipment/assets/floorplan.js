@@ -10,7 +10,10 @@ import {
 } from "./bathroom-fixtures.js";
 import { trackLengthCm } from "./track-lighting.js";
 import { objectIconKind, renderObjectIcon } from "./plan-icons.js";
-import { kitchenDrawOrder } from "./kitchen-icons.js";
+import { isUnknownDepthGuestTub } from "./guest-bath-plan.js";
+import {
+    KITCHEN_V_LAYOUT_TAG, KITCHEN_V_FILL_NOTE, kitchenDrawOrder, kitchenFillPattern,
+} from "./kitchen-icons.js";
 import { diagramPointSymbol } from "./outlet-diagram.js";
 import { planDisplayCategory } from "./plan-visibility.js";
 import {
@@ -243,8 +246,21 @@ function renderEntryLivingPassage(overview) {
     </g>`;
 }
 
+function itemDimensions(item, template) {
+    return {
+        widthCm: item.widthCm === undefined ? template?.widthCm ?? null : item.widthCm,
+        depthCm: item.depthCm === undefined ? template?.depthCm ?? null : item.depthCm,
+    };
+}
+
 export function itemFootprint(item, geometry) {
     if (item.kind === "door") return null;
+    if (isUnknownDepthGuestTub(item)) {
+        const width = item.widthCm *
+            (geometry.cmScale ?? PLAN_PIXELS_PER_CM);
+        return [90, 270].includes(item.orientation)
+            ? { width: 28, height: width } : { width, height: 28 };
+    }
     if (item.outletPlanPointId) return { width: 12, height: 12 };
     if (planDisplayCategory(item) === "outlets") return { width: 18, height: 18 };
     if (isFreshAirUnit(item)) {
@@ -278,8 +294,7 @@ export function itemFootprint(item, geometry) {
             : WALL_HEATER_MARKER;
     }
     const template = FURNITURE_TEMPLATES[objectIconKind(item)] ?? null;
-    const widthCm = item.widthCm ?? template?.widthCm;
-    const depthCm = item.depthCm ?? template?.depthCm;
+    const { widthCm, depthCm } = itemDimensions(item, template);
     const width = widthCm && depthCm && geometry.cmScale
         ? widthCm * geometry.cmScale : 22 * ICON_SCALE;
     const height = widthCm && depthCm && geometry.cmScale
@@ -316,11 +331,51 @@ export function guestVanityAssessment(items, geometry) {
         item.roomId === "bath-guest"));
     const vanity = fixtures[0];
     if (!vanity) return null;
-    const caution = "客浴壁掛浴櫃僅條件式暫位，非可施工配置；現位置及給排水不自動搬移。" +
+    const caution = "客浴壁掛浴櫃僅條件式圖面暫位，非可施工配置；" +
+        "圖面移動不代表給排水或牆體錨固已核准搬移。" +
         "門扇、浴缸／馬桶、磁磚完成面、固定承重及管線仍須現場實測。";
     if (!geometry.cmScale || fixtures.some((item) =>
         !item?.placement || !item.widthCm || !item.depthCm)) {
-        return { conflict: false, warning: `${caution} 尺寸或標位尚未齊全，不能確認間隙。` };
+        const [, tub, toilet] = fixtures;
+        if (geometry.cmScale && isUnknownDepthGuestTub(tub) &&
+            [0, 180].includes(tub.orientation) &&
+            fixtures.every((item) => item?.placement) &&
+            vanity.widthCm && vanity.depthCm &&
+            toilet.widthCm && toilet.depthCm) {
+            const horizontal = (item, width) => {
+                const center = item.placement.x *
+                    geometry.width / geometry.cmScale;
+                return { left: center - width / 2,
+                    right: center + width / 2 };
+            };
+            const tubX = horizontal(tub, tub.widthCm);
+            const cabinetSize = itemFootprint(vanity, geometry);
+            const toiletSize = itemFootprint(toilet, geometry);
+            const cabinetX = horizontal(vanity,
+                cabinetSize.width / geometry.cmScale);
+            const toiletX = horizontal(toilet,
+                toiletSize.width / geometry.cmScale);
+            const cabinetY = markerPosition(vanity, geometry).y;
+            const toiletY = markerPosition(toilet, geometry).y;
+            const toiletConflict = cabinetX.left < toiletX.right &&
+                cabinetX.right > toiletX.left &&
+                Math.abs(cabinetY - toiletY) <
+                    (cabinetSize.height + toiletSize.height) / 2;
+            return {
+                incomplete: true, conflict: toiletConflict,
+                tubDepthUnknown: true,
+                warning: `${caution} 浴缸深度／高度未定，80cm僅水平區段，` +
+                    "虛線帶不是實際占地；" +
+                    `浴櫃${vanity.widthCm}×${vanity.depthCm}cm仍是條件目標。` +
+                    `僅按圖面水平投影：浴缸區右緣約${tubX.right.toFixed(1)}cm、` +
+                    `浴櫃左緣約${cabinetX.left.toFixed(1)}cm；` +
+                    "無法判定浴缸完整占地、門扇或膝腿淨空，" +
+                    "不以未見重疊認定能安裝。" +
+                    (toiletConflict ? "浴櫃與馬桶已知圖示占地仍相交，須重新核對。" : ""),
+            };
+        }
+        return { incomplete: true, conflict: false,
+            warning: `${caution} 尺寸或標位尚未齊全，深度／淨距未定，不能確認間隙。` };
     }
     const [cabinet, tub, toilet] = fixtures.map((item) => {
         const point = markerPosition(item, geometry);
@@ -701,8 +756,10 @@ function overviewMarker(item, geometry, name, previewEnabled = false, items = []
     const iconKind = objectIconKind(item);
     const squareLabel = circuit || usesSquareLabel(item, iconKind);
     if (item.switchType && !switchOption) throw new RangeError("圖上開關型式無效。");
-    const actualFootprint = Boolean(geometry.cmScale && item.widthCm && item.depthCm) ||
-        Boolean(FURNITURE_TEMPLATES[iconKind]?.widthCm);
+    const dimensions = itemDimensions(item, FURNITURE_TEMPLATES[iconKind]);
+    const actualFootprint = isUnknownDepthGuestTub(item) ||
+        Boolean(geometry.cmScale &&
+        dimensions.widthCm && dimensions.depthCm);
     const iconWidth = item.kind === "equipment" && !airConditioner && !actualFootprint
         ? Math.min(width, socket || circuit ? 14 : 14 * ICON_SCALE) : width;
     const iconHeight = towelRail || grabBar ? 16 :
@@ -917,6 +974,59 @@ function renderPreviewConnections(rooms, items, focusedCircuitId, roomId = null)
     </g>`;
 }
 
+export function kitchenShortWingFill(items, geometry) {
+    if (geometry.id !== "kitchen") return null;
+    const pair = ["return", "tower"].map((key) =>
+        items.find((item) => item.id === `kitchen-plan-${key}` &&
+            item.roomId === "kitchen"));
+    if (!pair.some((item) => item?.note?.includes(KITCHEN_V_LAYOUT_TAG))) return null;
+    const hob = items.find((item) =>
+        item.id === "kitchen-plan-cooktop-base" && item.roomId === "kitchen");
+    const invalid = { valid: false,
+        note: "短翼圖例已移動或缺漏，連續填補停用；請重新核對兩櫃與轉角。" };
+    if ([...pair, hob].some((item) => !item?.placement ||
+        !Number.isFinite(item.widthCm) || !Number.isFinite(item.depthCm))) {
+        return invalid;
+    }
+    const bounds = (item) => {
+        const center = markerPosition(item, geometry);
+        const size = itemFootprint(item, geometry);
+        return { x: center.x, y: center.y, left: center.x - size.width / 2,
+            right: center.x + size.width / 2, top: center.y - size.height / 2,
+            bottom: center.y + size.height / 2 };
+    };
+    const [platform, tower, cooktop] = [...pair, hob].map(bounds);
+    if (platform.y >= tower.y || tower.y <= cooktop.y ||
+        Math.max(platform.left, tower.left) >= Math.min(platform.right, tower.right) ||
+        platform.left < cooktop.x || tower.bottom > geometry.y + geometry.height ||
+        platform.top < geometry.y) return invalid;
+    const x = Math.min(platform.left, tower.left);
+    const right = Math.max(platform.right, tower.right);
+    const y = Math.min(cooktop.top, platform.top);
+    return { valid: true, x, y, width: right - x,
+        height: geometry.y + geometry.height - y, note: KITCHEN_V_FILL_NOTE };
+}
+
+function renderKitchenShortWingFill(items, geometry, scope) {
+    const fill = kitchenShortWingFill(items, geometry);
+    if (!fill) return "";
+    const id = `kitchen-${scope}-flex`;
+    return `<g class="kitchen-flex-intent"
+        data-kitchen-fill="${fill.valid ? "adjustable" : "needs-review"}"
+        role="img" tabindex="0" aria-label="${escapeSvg(fill.note)}">
+        <title>${escapeSvg(fill.note)}</title>
+        ${fill.valid ? `<defs>${kitchenFillPattern(id)}
+            <clipPath id="${id}-clip"><path d="${geometry.path}"/></clipPath></defs>
+            <rect class="kitchen-adjustable-fill" data-fill-band="short-wing"
+                x="${fill.x}" y="${fill.y}" width="${fill.width}" height="${fill.height}"
+                fill="url(#${id})" clip-path="url(#${id}-clip)"/>` : ""}
+        <text class="kitchen-fill-label" x="${geometry.x + 6}"
+            y="${geometry.y + geometry.height - 7}">
+            ${fill.valid ? "斜線：訂製伸縮，非實測淨距" : "短翼填補停用：位置／尺寸待核"}
+        </text>
+    </g>`;
+}
+
 export function renderOverviewPlan(rooms, items, showSource = false, activeLightIds = null,
     visibleLayers = DEFAULT_VISIBLE_LAYERS, focusedCircuitId = null,
     planeHeightCm = 80) {
@@ -942,6 +1052,8 @@ export function renderOverviewPlan(rooms, items, showSource = false, activeLight
             <path class="zone-grid" d="${zone.path}" fill="url(#plan-meter-grid)"/>
             ${renderLightingPreview(geometry, items, activeLightIds, planeHeightCm)}
             ${renderWetDryDivider(zone.id, items)}
+            ${visibleLayers.furniture
+                ? renderKitchenShortWingFill(roomItems, geometry, "overview") : ""}
             ${zone.id === "balcony" && visibleLayers.furniture ? renderBalconySink() : ""}
             ${zone.id === "ac-platform" ? renderExteriorPlatform(false, items) : ""}
             ${zone.id === "corridor"
@@ -1095,13 +1207,17 @@ function detailMarker(item, geometry, selectedItemId, previewEnabled = false,
     const squareLabel = circuit || usesSquareLabel(item, iconKind);
     if (item.switchType && !switchOption) throw new RangeError("圖上開關型式無效。");
     const measured = Boolean(geometry.cmScale && item.widthCm && item.depthCm);
+    const sizeCm = itemDimensions(item, nativeFurniture);
     const templateSize = Boolean(geometry.cmScale &&
-        nativeFurniture?.widthCm && nativeFurniture?.depthCm);
+        sizeCm.widthCm && sizeCm.depthCm);
     const appliance = iconKind === "washer" || iconKind === "dryer";
     const verticalAirConditioner = airConditioner && [0, 180].includes(item.orientation);
-    const size = measured || templateSize
-        ? { width: (item.widthCm ?? nativeFurniture.widthCm) * geometry.cmScale,
-            height: (item.depthCm ?? nativeFurniture.depthCm) * geometry.cmScale }
+    const size = isUnknownDepthGuestTub(item)
+        ? { width: item.widthCm *
+            (geometry.cmScale ?? PLAN_PIXELS_PER_CM), height: 28 }
+        : templateSize
+        ? { width: sizeCm.widthCm * geometry.cmScale,
+            height: sizeCm.depthCm * geometry.cmScale }
         : freshAir ? { width: 32, height: 28 } :
             rinseKit ? { width: 20, height: 20 } :
             towelRail ? { width: 30, height: 10 } :
@@ -1227,7 +1343,8 @@ function detailMarker(item, geometry, selectedItemId, previewEnabled = false,
                 ${appliance ? `<text class="appliance-corner-label"
                     x="${-footprint.width / 2 + 5}" y="${-footprint.height / 2 + 16}"
                     text-anchor="start">${iconKind === "washer" ? "洗" : "烘"}</text>` : ""}
-                ${item.id === "bath-guest-tub" ? `<text class="object-inline-label"
+                ${item.id === "bath-guest-tub" && !isUnknownDepthGuestTub(item)
+                    ? `<text class="object-inline-label"
                     text-anchor="middle" y="4">${escapeSvg(item.name.slice(0, 2))}</text>` : ""}`
             : `<g class="equipment-body" transform="rotate(${orientation})">
                 <rect class="${measured ? "measured-equipment" : "unsized-equipment"}"
@@ -1461,6 +1578,8 @@ export function renderRoomPlan(room, items, selectedItemId, allItems = items,
         ${room.id === "balcony" && visibleLayers.furniture ? renderBalconySink() : ""}
         ${room.id === "ac-platform" ? renderExteriorPlatform(true, allItems) : ""}
         ${renderWetDryDivider(room.id, allItems, true)}
+        ${visibleLayers.furniture
+            ? renderKitchenShortWingFill(items, geometry, "room") : ""}
         ${doorsForRoom(room.id).map((door) =>
             renderDoor(door, allItems, false, room.id !== "corridor")).join("")}
         ${room.id === "entry" || room.id === "living-dining"

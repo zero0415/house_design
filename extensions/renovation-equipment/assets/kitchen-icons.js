@@ -1,3 +1,15 @@
+export const KITCHEN_V_LAYOUT_TAG = "[kitchen-v-layout:2]";
+export const KITCHEN_V_FILL_NOTE =
+    "斜線＝訂製伸縮預留，表示短翼連續填滿意向，不是另一個櫃體、商品或實測尺寸；" +
+    "兩櫃仍可編輯，實際寬深、端板、門窗及設備淨距須丈量，非零間隙／可施工保證。";
+
+export function kitchenFillPattern(id, background = true) {
+    return `<pattern id="${id}" width="6" height="6" patternUnits="userSpaceOnUse">
+        ${background ? '<rect width="6" height="6" fill="#f5ead4"/>' : ""}
+        <path d="M-1 1 L1 -1 M0 6 L6 0 M5 7 L7 5" stroke="#92764d" stroke-width=".7"/>
+    </pattern>`;
+}
+
 export function kitchenDrawOrder(a, b) {
     const layer = (item) => {
         const type = item.furnitureType ?? "";
@@ -25,8 +37,8 @@ export function renderKitchenIcon(item, width, height) {
             text(`${label} ${item.widthCm}cm`,
                 y + (type === "kitchen-cooktop-base" ? 17 : 6), 6);
     } else if (type === "kitchen-tower" || type === "kitchen-return") {
-        body = box("kitchen-base") + text(type === "kitchen-tower" ? "電器高櫃" : "訂製短櫃") +
-            text("暫估", 10, 6);
+        body = box("kitchen-base") + text(type === "kitchen-tower" ? "訂製高櫃" : "轉角備餐") +
+            text("尺寸待量", 10, 6);
     } else if (type === "kitchen-ih" || type === "kitchen-gas") {
         const r = Math.min(width, height) * .31;
         body = box() + `<circle class="kitchen-ring" r="${r}"/>` +

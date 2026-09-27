@@ -34,18 +34,18 @@ class PublicSnapshotTests(unittest.TestCase):
     def test_public_docs_match_derived_sample(self):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         quote = QUOTE.read_text(encoding="utf-8")
-        for value in ("51", "9", "7", "27,000", "51,500", "2,345,496.20",
-                      "16,000", "10 筆", "NT$0", "7,186", "14,994", "3,960",
+        for value in ("51", "9", "7", "27,000", "51,500", "2,318,560.20",
+                      "16,000", "10 筆", "NT$0", "14,994", "3,960",
                       "26,936", "NT$6,600", "NT$13,200", "1,215",
                       "140,088", "21,032", "GPR-23HI", "4 坪內",
-                      "4,684", "967.20", "42,500", "237,548.20",
+                      "4,684", "967.20", "42,500", "210,612.20",
                       "59.8", "55", "B06", "5.9cm"):
             with self.subTest(value=value):
                 self.assertIn(value, readme)
                 self.assertIn(value, quote)
         self.assertIn("179 個物件與 28 款商品", readme)
         self.assertIn("沒有發布原始工程／電源配置 PDF", readme)
-        self.assertIn("廚房附件", readme)
+        self.assertIn("廚房及客浴附件", readme)
         self.assertIn("不自動移入屋內", readme)
         self.assertIn("不自動移入屋內", quote)
         self.assertIn("免治便座、新風機、電熱毛巾架、防滑扶手", readme)
@@ -64,6 +64,12 @@ class PublicSnapshotTests(unittest.TestCase):
         self.assertIn("臥室2室外位置／區域 ID 為 `null`", quote)
         self.assertIn("60cm 檯面**模組外幅不是淨開口", quote)
         self.assertIn("鏡櫃另待選", quote)
+        self.assertIn("7,186", quote)
+        for value in ("單片 L 形檯面", "短翼末端", "60×深47cm",
+                      "80cm 坐式浴缸", "未選候選", "不能把未知價當零元"):
+            with self.subTest(new=value):
+                self.assertIn(value, quote)
+        self.assertIn("私人客浴參考 PNG 未發布", readme)
 
     def test_sample_is_deidentified_without_losing_the_plan(self):
         state = json.loads(SAMPLE.read_text(encoding="utf-8"))
@@ -115,10 +121,10 @@ class PublicSnapshotTests(unittest.TestCase):
                           by_id["bath-guest-toilet"]["unitPrice"],
                           by_id["bath-guest-tub"]["unitPrice"],
                           by_id["bath-main-urinal-u0211-a624"]["unitPrice"]),
-                         (14994, 14994, 26936, 3960))
+                         (14994, 14994, None, 3960))
         self.assertTrue(all(by_id[fixture]["unitPrice"] is None
                             for fixture in fixture_ids -
-                            {"bath-main-toilet", "bath-guest-toilet", "bath-guest-tub",
+                            {"bath-main-toilet", "bath-guest-toilet",
                              "bath-main-urinal-u0211-a624"}))
         for room in ("bath-main", "bath-guest"):
             with self.subTest(room=room):
@@ -132,7 +138,7 @@ class PublicSnapshotTests(unittest.TestCase):
         self.assertIn("原報兩套衛浴一般安裝已含",
                       by_id["bath-main-toilet"]["note"])
         self.assertIn("超出原安裝額度的補差", by_id["bath-main-urinal-u0211-a624"]["note"])
-        self.assertIn("排水改管", by_id["bath-guest-tub"]["note"])
+        self.assertIn("浴缸改管", by_id["bath-guest-tub"]["note"])
 
     def test_dealer_catalog_links_and_currency_cautions(self):
         state = json.loads(SAMPLE.read_text(encoding="utf-8"))
@@ -143,7 +149,7 @@ class PublicSnapshotTests(unittest.TestCase):
              "TOTO CW288SGUR", 14994, "TWD", "NT$23,800 × 0.63＝NT$14,994"),
             ("sample-product-02", ("bath-main-urinal-u0211-a624",),
              "凱薩 U0211-A624", 3960, "TWD", "NT$13,200 × 0.3＝NT$3,960"),
-            ("sample-product-03", ("bath-guest-tub",),
+            ("sample-product-03", (),
              "OVO BK106A", 26936, "TWD", "NT$51,800 × 0.52＝NT$26,936"),
             ("sample-product-04", ("bath-main-bidet-tcf8cm76",
                                    "bath-guest-bidet-tcf8cm76"),
@@ -284,7 +290,7 @@ class PublicSnapshotTests(unittest.TestCase):
         self.assertEqual((items["bath-guest-vanity"]["widthCm"],
                           items["bath-guest-vanity"]["depthCm"],
                           items["bath-main-vanity"]["widthCm"],
-                          items["bath-main-vanity"]["depthCm"]), (60, 35, 60, 35))
+                          items["bath-main-vanity"]["depthCm"]), (60, 47, 60, 47))
         self.assertTrue(all(items[f"{room}-vanity"]["installationUnitPrice"] == 0
                             for room in ("bath-main", "bath-guest")))
         self.assertEqual((items["bath-guest-tub-grab-bar"]["unitPrice"],
@@ -384,6 +390,45 @@ class PublicSnapshotTests(unittest.TestCase):
             kitchen["kitchen-plan-tower"]["placement"]["x"],
         )
 
+    def test_v_kitchen_and_unpriced_guest_bath_are_precisely_conditional(self):
+        state = json.loads(SAMPLE.read_text(encoding="utf-8"))
+        items = {item["id"]: item for item in state["items"]}
+        products = {product["id"]: product for product in state["products"]}
+        tower = items["kitchen-plan-tower"]
+        platform = items["kitchen-plan-return"]
+        self.assertEqual((tower["placement"], platform["placement"]),
+                         ({"x": .826, "y": .675}, {"x": .824, "y": .262}))
+        self.assertEqual((tower["widthCm"], tower["depthCm"],
+                          platform["widthCm"], platform["depthCm"]),
+                         (40, 60, 40, 75))
+        for cabinet in (tower, platform):
+            self.assertIsNone(cabinet["unitPrice"])
+            self.assertIsNone(cabinet["productId"])
+            self.assertIn("[kitchen-v-layout:2]", cabinet["note"])
+            self.assertIn("非訂製尺寸", cabinet["note"])
+        tub = items["bath-guest-tub"]
+        self.assertEqual((tub["name"], tub["brandModel"], tub["unitPrice"],
+                          tub["productId"], tub["widthCm"], tub["depthCm"],
+                          tub["heightCm"], tub["orientation"],
+                          tub["installationUnitPrice"]),
+                         ("坐式浴缸（80cm條件目標）", "", None, None,
+                          80, None, None, 0, 0))
+        self.assertEqual(tub["placement"], {"x": .202, "y": .382})
+        self.assertIn("[guest-bath-80:1]", tub["note"])
+        self.assertIn("深度", tub["note"])
+        self.assertTrue(all(items[key]["depthCm"] == 47 for key in
+                            ("bath-guest-vanity", "bath-main-vanity")))
+        self.assertEqual(items["bath-guest-vanity"]["placement"],
+                         {"x": 111.41 / 205, "y": .157})
+        self.assertEqual(items["bath-main-vanity"]["placement"],
+                         {"x": .478, "y": .808})
+        self.assertEqual(products["sample-product-03"]["unitPrice"], 26936)
+        self.assertFalse(any(item["productId"] == "sample-product-03"
+                             for item in state["items"]))
+        self.assertEqual((len(state["rooms"]), len(state["items"]),
+                          len(state["products"]), state["revision"], state["undo"]),
+                         (13, 179, 28, 0, None))
+
     def test_offline_bundle_has_only_source_modules(self):
         html = PORTABLE.read_text(encoding="utf-8")
         match = re.search(
@@ -398,7 +443,7 @@ class PublicSnapshotTests(unittest.TestCase):
         self.assertIn("assets/survey.js", {entry["path"] for entry in bundle["modules"]})
         for name in ("kitchen-plan.js", "kitchen-icons.js", "outlet-diagram.js",
                      "bathroom-installation.js", "laundry-notes.js",
-                     "quote-provenance.js"):
+                     "quote-provenance.js", "guest-bath-plan.js"):
             self.assertIn(f"assets/{name}", {entry["path"] for entry in bundle["modules"]})
         for name in ("corridor-plan.js", "air-conditioning-plan.js"):
             self.assertTrue((ROOT / "extensions" / "renovation-equipment" / "assets" /

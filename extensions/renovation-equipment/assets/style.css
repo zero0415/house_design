@@ -1511,8 +1511,29 @@ p { margin: 6px 0 10px; }
     fill: #263c45; stroke: none; font-weight: 600;
 }
 .kitchen-reference { margin-block: 12px; padding: 12px; border: 1px solid #b5c1c8; }
-.kitchen-reference svg { display: block; width: min(100%, 620px); margin: auto; }
-.kitchen-reference svg text { font-size: 8px; text-anchor: middle; fill: #263c45; }
+.kitchen-reference svg { display: block; width: 100%; min-width: 760px; margin: auto; background: #fafcfb; }
+.kitchen-reference svg[data-kitchen-view="elevations"] { min-width: 860px; }
+.kitchen-reference svg text { font-size: 14px; text-anchor: middle; fill: #263c45; }
+.kitchen-reference svg .view-heading { font-size: 17px; font-weight: 700; }
+.kitchen-reference figure { margin: 16px 0; min-width: 0; }
+.kitchen-reference figcaption { font-weight: 700; margin-bottom: 6px; }
+.kitchen-projection-scroll { overflow-x: auto; border: 1px solid #b5c1c8; border-radius: 6px; }
+.kitchen-projection-scroll:focus-visible, .kitchen-reference > summary:focus-visible { outline: 2px solid var(--color-focus-outline, #0969da); outline-offset: 3px; }
+.kitchen-reference > summary { cursor: pointer; }
+.kitchen-reference-side { fill: #cdbb9f; stroke: #876d49; }
+.kitchen-appliance { fill: #e3e9ee; stroke: #526e87; }
+.kitchen-ih-surface { fill: #d2e9e5; stroke: #42685e; }
+.kitchen-gas-surface { fill: #f5dfc2; stroke: #a47b44; }
+.kitchen-reference .kitchen-layer-under { stroke-dasharray: 6 4; fill-opacity: .5; }
+.kitchen-reference .kitchen-layer-above { stroke-dasharray: 2 3; fill-opacity: .5; }
+.kitchen-dimension { fill: none; stroke: #526e87; stroke-width: 1; }
+.kitchen-adjustable-fill { stroke: #92764d; stroke-width: .7; }
+.kitchen-concept-seam { stroke-dasharray: 4 3; }
+.kitchen-flex-intent { pointer-events: none; }
+.kitchen-flex-intent:focus-visible { outline: 2px solid #0969da; }
+.kitchen-fill-label { font-size: 8px; fill: #70532e; stroke: none; }
+.unknown-depth-tub rect { fill: #edf5f8; stroke: #93631d; stroke-dasharray: 4 3; }
+.unknown-depth-tub text { font-size: 7px; fill: #70501e; stroke: none; }
 .kitchen-reference p { font-size: 13px; line-height: 1.6; }
 .kitchen-unconfirmed-flue { fill: none; stroke: #a47722; stroke-dasharray: 3 2; }
 .object-icon .icon-sheet,

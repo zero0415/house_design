@@ -37,6 +37,7 @@ const assets = new Map([
     ["/track-lighting.js", [join(extensionDirectory, "assets", "track-lighting.js"), "text/javascript; charset=utf-8"]],
     ["/lighting-options.js", [join(extensionDirectory, "assets", "lighting-options.js"), "text/javascript; charset=utf-8"]],
     ["/bathroom-fixtures.js", [join(extensionDirectory, "assets", "bathroom-fixtures.js"), "text/javascript; charset=utf-8"]],
+    ["/guest-bath-plan.js", [join(extensionDirectory, "assets", "guest-bath-plan.js"), "text/javascript; charset=utf-8"]],
     ["/ac-outdoors.js", [join(extensionDirectory, "assets", "ac-outdoors.js"), "text/javascript; charset=utf-8"]],
     ["/corridor-plan.js", [join(extensionDirectory, "assets", "corridor-plan.js"), "text/javascript; charset=utf-8"]],
     ["/air-conditioning-plan.js", [join(extensionDirectory, "assets", "air-conditioning-plan.js"), "text/javascript; charset=utf-8"]],

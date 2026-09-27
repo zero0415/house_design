@@ -25,6 +25,12 @@ if not CHROME and os.environ.get("ProgramFiles"):
                      "chrome.exe")
     if candidate.is_file():
         CHROME = str(candidate)
+EDGE = next((str(path) for path in (
+    Path(os.environ.get("ProgramFiles(x86)", "")) / "Microsoft" / "Edge" /
+    "Application" / "msedge.exe",
+    Path(os.environ.get("ProgramFiles", "")) / "Microsoft" / "Edge" /
+    "Application" / "msedge.exe",
+) if path.is_file()), None)
 
 INCLUDED_BATHROOM_IDS = {
     *(f"{room}-{fixture}" for room in ("bath-main", "bath-guest")
@@ -47,10 +53,6 @@ def legacy_bathroom_save():
         "bath-main-urinal-u0211-a624": (
             "固定方式與超出原安裝額度的補差待確認；本件安裝另加 NT$0（原報已含）。",
             "固定方式與安裝費待確認。",
-        ),
-        "bath-guest-tub": (
-            "排水改管與超出原安裝額度的補差待核；本件安裝另加 NT$0（原報已含）。",
-            "排水與安裝費均待確認。",
         ),
     }
     for item in state["items"]:
@@ -127,7 +129,7 @@ class PagesPreviewTests(unittest.TestCase):
             page.on("pageerror", lambda error: errors.append(str(error)))
             self.open_demo(page)
             self.assertEqual(page.locator(".overview-svg .plan-zone").count(), 13)
-            self.assertEqual(page.locator("#overall-total").inner_text(), "NT$2,345,496.2")
+            self.assertEqual(page.locator("#overall-total").inner_text(), "NT$2,318,560.2")
             self.assertEqual(page.locator(".overview-svg [data-outlet-point-id]").count(), 67)
             for prefix, count in (("R", 51), ("B", 9), ("C", 7)):
                 self.assertEqual(page.locator(
@@ -259,7 +261,7 @@ class PagesPreviewTests(unittest.TestCase):
                 };
             }""")
             self.assertEqual(report["quote"], 1_959_530)
-            self.assertEqual(report["plan"], 2_345_496.2)
+            self.assertEqual(report["plan"], 2_318_560.2)
             self.assertEqual(report["kitchenAdditions"], 94_000)
             self.assertEqual((report["weakAdditions"], report["weakQuoted"]), (0, 21_000))
             self.assertEqual(report["counts"], {
@@ -272,6 +274,264 @@ class PagesPreviewTests(unittest.TestCase):
                                   "unchangedOutlets", "partialRejected", "weakRejected",
                                   "csvAnchors", "oldSampleIgnored"):
                 self.assertTrue(report[property_name], property_name)
+        finally:
+            context.close()
+
+    def test_kitchen_reference_three_fixed_svg_views_in_pages(self):
+        context = self.browser.new_context()
+        try:
+            page = context.new_page()
+            errors = []
+            requests = []
+            page.on("pageerror", lambda error: errors.append(str(error)))
+            page.on("request", lambda request: requests.append(request.url)
+                    if request.url.startswith(("http:", "https:")) else None)
+            self.open_demo(page)
+            page.locator('.overview-svg .plan-zone[data-select-room="kitchen"]').click()
+            reference = page.locator(".kitchen-reference")
+            self.assertIsNone(reference.get_attribute("open"))
+            self.assertEqual(reference.locator("figure").count(), 3)
+            self.assertEqual(reference.locator("svg").count(), 3)
+            self.assertTrue(all(svg.is_hidden() for svg in reference.locator("svg").all()))
+            before = page.evaluate("globalThis.__RENOVATION_OFFLINE_STORE__.read()")
+            total = page.locator(".budget").inner_text()
+            reference.locator("summary").focus()
+            page.keyboard.press("Enter")
+            self.assertIsNotNone(reference.get_attribute("open"))
+            self.assertEqual([caption.inner_text() for caption in reference.locator(
+                "figcaption").all()],
+                ["① 立體圖（約45°）", "② 正立面／直立圖（長牆＋短牆）",
+                 "③ 俯視圖"])
+            for kind in ("isometric", "elevations", "top"):
+                svg = reference.locator(f'svg[data-kitchen-view="{kind}"]')
+                self.assertTrue(svg.is_visible(), kind)
+                self.assertEqual(svg.get_attribute("role"), "img")
+                self.assertEqual(svg.locator("title[id]").get_attribute("id"),
+                                 svg.get_attribute("aria-labelledby"))
+                self.assertEqual(svg.locator("[data-kitchen-bay]").count(), 5)
+                self.assertEqual(svg.locator("[data-kitchen-object]").count(), 7)
+                for selector in (
+                    '[data-kitchen-object="dishwasher"][data-bay="prep"][data-layer="under"]',
+                    '[data-kitchen-object="hot-water"][data-bay="sink"][data-layer="under"]',
+                    '[data-kitchen-object="ih"][data-bay="hob"]',
+                    '[data-kitchen-object="gas"][data-bay="hob"]',
+                    '[data-kitchen-object="hood"][data-bay="hob"][data-layer="above"]',
+                    '[data-kitchen-bay="short-return"]',
+                    '[data-kitchen-bay="tower-short-end"]',
+                ):
+                    self.assertEqual(svg.locator(selector).count(), 1, (kind, selector))
+                self.assertEqual(svg.locator(
+                    '[data-kitchen-bay="tower-main-right"]').count(), 0)
+                self.assertEqual(svg.locator(
+                    '[data-kitchen-fill="adjustable"]').count(), 1)
+            iso = reference.locator('svg[data-kitchen-view="isometric"]')
+            self.assertEqual(iso.locator(
+                '[data-countertop-outline="single-L"]').count(), 1)
+            self.assertEqual(len(iso.locator(
+                '[data-countertop-outline="single-L"]').get_attribute(
+                    "points").split()), 6)
+            self.assertEqual(iso.locator(
+                '[data-kitchen-countertop="continuous-open-corner"]').count(), 1)
+            for bay in ("prep", "sink", "hob", "short-return"):
+                self.assertEqual(iso.locator(
+                    f'[data-kitchen-bay="{bay}"] polygon.kitchen-reference-top'
+                ).count(), 0)
+            joined = reference.evaluate("""element => {
+                const bounds = (selector) => {
+                    const {x,y,width,height} =
+                        element.querySelector(selector).getBBox();
+                    return {x,y,width,height};
+                };
+                return {
+                    topFill:bounds('svg[data-kitchen-view="top"] [data-kitchen-fill] rect'),
+                    topPrep:bounds('svg[data-kitchen-view="top"] [data-kitchen-bay="short-return"] rect'),
+                    topTower:bounds('svg[data-kitchen-view="top"] [data-kitchen-bay="tower-short-end"] rect'),
+                    frontPrep:bounds('svg[data-kitchen-view="elevations"] [data-kitchen-bay="short-return"] rect'),
+                    frontTower:bounds('svg[data-kitchen-view="elevations"] [data-kitchen-bay="tower-short-end"] rect'),
+                };
+            }""")
+            self.assertLess(joined["topPrep"]["y"] + joined["topPrep"]["height"],
+                            joined["topTower"]["y"])
+            self.assertLessEqual(joined["topFill"]["y"], joined["topPrep"]["y"])
+            self.assertGreaterEqual(joined["topFill"]["y"] + joined["topFill"]["height"],
+                                    joined["topTower"]["y"] + joined["topTower"]["height"])
+            self.assertEqual((joined["topPrep"]["x"], joined["topPrep"]["width"]),
+                             (joined["topTower"]["x"], joined["topTower"]["width"]))
+            self.assertEqual(joined["frontPrep"]["x"] + joined["frontPrep"]["width"],
+                             joined["frontTower"]["x"])
+            self.assertIn("尚未證明有足夠內部淨寬", reference.inner_text())
+            self.assertIn("價格以存檔為準", reference.inner_text())
+            self.assertIn("不隨拖曳", reference.inner_text())
+            self.assertEqual(reference.locator("img, image, iframe, foreignObject").count(), 0)
+            self.assertEqual(page.locator(
+                'svg[data-room-canvas="kitchen"] [data-marker-id^="kitchen-plan-"]'
+            ).count(), 12)
+            reference.locator("summary").click()
+            self.assertIsNone(reference.get_attribute("open"))
+            self.assertEqual(page.evaluate(
+                "globalThis.__RENOVATION_OFFLINE_STORE__.read()"), before)
+            self.assertEqual(page.locator(".budget").inner_text(), total)
+            self.assertIsNone(page.evaluate(
+                "localStorage.getItem('renovation-equipment-offline-v1:' + location.pathname)"
+            ))
+            self.assertEqual(errors, [])
+            self.assertTrue(all(url.startswith(self.base) for url in requests))
+        finally:
+            context.close()
+
+    def test_kitchen_reference_offline_mobile_in_edge(self):
+        if not EDGE:
+            self.skipTest("Microsoft Edge is not installed")
+        browser = self.playwright.chromium.launch(
+            executable_path=EDGE, headless=True
+        )
+        try:
+            context = browser.new_context(viewport={"width": 390, "height": 844})
+            try:
+                page = context.new_page()
+                requests = []
+                errors = []
+                page.on("pageerror", lambda error: errors.append(str(error)))
+                page.on("request", lambda request: requests.append(request.url)
+                        if request.url.startswith(("http:", "https:")) else None)
+                page.on("dialog", lambda dialog: dialog.accept())
+                page.goto(PORTABLE.as_uri())
+                page.wait_for_function("Boolean(globalThis.__RENOVATION_OFFLINE_STORE__)")
+                page.locator("#load-file-input").set_input_files(str(SAMPLE))
+                page.wait_for_function(
+                    "document.querySelector('#overall-total').textContent.includes('2,318,560')",
+                    timeout=15000,
+                )
+                page.locator('.plan-zone[data-select-room="kitchen"]').click()
+                reference = page.locator(".kitchen-reference")
+                self.assertIsNone(reference.get_attribute("open"))
+                self.assertTrue(all(svg.is_hidden() for svg in
+                                    reference.locator("svg").all()))
+                before = page.evaluate("globalThis.__RENOVATION_OFFLINE_STORE__.read()")
+                total = page.locator(".budget").inner_text()
+                reference.locator("summary").focus()
+                page.keyboard.press("Enter")
+                for kind in ("isometric", "elevations", "top"):
+                    self.assertTrue(reference.locator(
+                        f'[data-kitchen-view="{kind}"]').is_visible())
+                for index, panel in enumerate(reference.locator(
+                    ".kitchen-projection-scroll").all()):
+                    panel.focus()
+                    self.assertTrue(panel.evaluate(
+                        "element => element.scrollWidth > element.clientWidth"))
+                    self.assertGreaterEqual(panel.locator("svg").evaluate(
+                        "element => element.getBoundingClientRect().width"),
+                        860 if index == 1 else 760)
+                    page.keyboard.press("ArrowRight")
+                    page.wait_for_function("document.activeElement.scrollLeft > 0")
+                reference.locator("summary").click()
+                self.assertIsNone(reference.get_attribute("open"))
+                self.assertEqual(page.evaluate(
+                    "globalThis.__RENOVATION_OFFLINE_STORE__.read()"), before)
+                self.assertEqual(page.locator(".budget").inner_text(), total)
+                page.locator(
+                    "nav.plan-room-navigation select[data-plan-room-select]"
+                ).select_option("bath-guest")
+                self.assertEqual(page.locator(
+                    'svg[data-room-canvas="bath-guest"] '
+                    '[data-tub-depth="unknown"]').count(), 1)
+                self.assertIn("深度／淨距未定，非可施工",
+                              page.locator(
+                                  '[data-vanity-warning="bath-guest-vanity"]'
+                              ).first.inner_text())
+                self.assertEqual(page.evaluate(
+                    "globalThis.__RENOVATION_OFFLINE_STORE__.read()"), before)
+                self.assertEqual(requests, [])
+                self.assertEqual(errors, [])
+            finally:
+                context.close()
+        finally:
+            browser.close()
+
+    def test_public_v_migration_preserves_anonymous_data_and_visual_fill(self):
+        context = self.browser.new_context()
+        try:
+            page = context.new_page()
+            errors = []
+            requests = []
+            page.on("pageerror", lambda error: errors.append(str(error)))
+            page.on("request", lambda request: requests.append(request.url)
+                    if request.url.startswith(("http:", "https:")) else None)
+            self.open_demo(page)
+            report = page.evaluate("""async () => {
+                const root = new URL('../extensions/renovation-equipment/assets/',
+                    location.href);
+                const [{migrateKitchenVLayout,renderKitchenReference},
+                    {kitchenShortWingFill,renderOverviewPlan,renderRoomPlan,roomGeometry},
+                    {calculateBudget,calculatePlanTotal,ORIGINAL_QUOTE_TWD}] =
+                    await Promise.all(['kitchen-plan.js','floorplan.js','budget.js']
+                        .map(name => import(new URL(name,root))));
+                const original = await globalThis.__RENOVATION_OFFLINE_STORE__.read();
+                const before = structuredClone(original);
+                const migrated = migrateKitchenVLayout(original);
+                const next = migrated.state;
+                const changedIds = original.items.filter((item,index) =>
+                    JSON.stringify(item) !== JSON.stringify(next.items[index]))
+                    .map(item => item.id);
+                const room = next.rooms.find(item => item.id === 'kitchen');
+                const geometry = roomGeometry(room);
+                const fill = kitchenShortWingFill(next.items,geometry);
+                const overview = renderOverviewPlan(next.rooms,next.items);
+                const detailed = renderRoomPlan(room,next.items.filter(item =>
+                    item.roomId === 'kitchen'),null,next.items);
+                const moved = structuredClone(next);
+                moved.items.find(item => item.id === 'kitchen-plan-return')
+                    .placement.x = .2;
+                const invalid = kitchenShortWingFill(moved.items,geometry);
+                const reference = renderKitchenReference();
+                return {
+                    changed:migrated.changed,changedIds,
+                    itemCount:next.items.length,productCount:next.products.length,
+                    roomsUntouched:JSON.stringify(original.rooms) ===
+                        JSON.stringify(next.rooms),
+                    productsUntouched:JSON.stringify(original.products) ===
+                        JSON.stringify(next.products),
+                    sourceUntouched:JSON.stringify(original) ===
+                        JSON.stringify(before),
+                    baseline:ORIGINAL_QUOTE_TWD,
+                    total:calculatePlanTotal(calculateBudget(next.items,{
+                        wholePlan:true})).TWD,
+                    revision:next.revision,
+                    anchorsUntouched:next.items.filter(item => item.outletPlanPointId)
+                        .every(item => JSON.stringify(item.placement) ===
+                            JSON.stringify(original.items.find(entry => entry.id ===
+                                item.id).placement)),
+                    tower:next.items.find(item => item.id === 'kitchen-plan-tower'),
+                    platform:next.items.find(item => item.id === 'kitchen-plan-return'),
+                    fillValid:fill?.valid === true,
+                    fillExtends:fill && Math.abs(fill.y+fill.height-
+                        (geometry.y+geometry.height)) < .000001,
+                    overviewFill:overview.includes('data-fill-band="short-wing"'),
+                    roomFill:detailed.includes('data-fill-band="short-wing"'),
+                    invalidFill:invalid?.valid === false,
+                    referenceL:reference.includes('data-countertop-outline="single-L"'),
+                    oldEditsUnchanged:localStorage.length === 0,
+                };
+            }""")
+            self.assertEqual(report["changedIds"],
+                             ["kitchen-plan-tower", "kitchen-plan-return"]
+                             if report["changed"] else [])
+            self.assertEqual((report["itemCount"], report["productCount"],
+                              report["revision"]), (179, 28, 0))
+            self.assertEqual((report["baseline"], report["total"]),
+                             (1_959_530, 2_318_560.2))
+            for key in ("roomsUntouched", "productsUntouched", "sourceUntouched",
+                        "anchorsUntouched", "fillValid", "fillExtends",
+                        "overviewFill", "roomFill", "invalidFill", "referenceL",
+                        "oldEditsUnchanged"):
+                self.assertTrue(report[key], key)
+            self.assertEqual(report["tower"]["placement"], {"x": .826, "y": .675})
+            self.assertEqual(report["platform"]["placement"], {"x": .824, "y": .262})
+            self.assertIsNone(report["tower"]["unitPrice"])
+            self.assertIsNone(report["platform"]["unitPrice"])
+            self.assertIn("非訂製尺寸", report["tower"]["note"])
+            self.assertEqual(errors, [])
+            self.assertTrue(all(url.startswith(self.base) for url in requests))
         finally:
             context.close()
 
@@ -357,7 +617,7 @@ class PagesPreviewTests(unittest.TestCase):
                 };
             }""")
             self.assertEqual((report["quote"], report["before"], report["after"]),
-                             (1_959_530, 2_345_496.2, 2_346_296.2))
+                             (1_959_530, 2_318_560.2, 2_319_360.2))
             self.assertEqual((report["products"], report["originalCeilings"]),
                              (28, 9))
             self.assertEqual((report["selectedCount"], report["repricedCount"],
@@ -390,7 +650,7 @@ class PagesPreviewTests(unittest.TestCase):
                     if request.url.startswith(("http:", "https:")) else None)
             self.open_demo(page)
             self.assertEqual(page.locator("#overall-total").inner_text(),
-                             "NT$2,345,496.2")
+                             "NT$2,318,560.2")
             note = page.locator("details.quote-intro")
             self.assertEqual(note.count(), 1)
             self.assertIsNone(note.get_attribute("open"))
@@ -423,11 +683,14 @@ class PagesPreviewTests(unittest.TestCase):
                 '.overview-svg .plan-zone[data-select-room="bath-guest"]'
             ).click()
             guest = page.locator('[data-vanity-warning="bath-guest-vanity"]').first
-            self.assertIn("重疊", guest.inner_text())
-            self.assertIn("9.15cm", guest.inner_text())
+            self.assertIn("深度／淨距未定，非可施工", guest.inner_text())
             guest.locator("details.warning-details > summary").click()
-            for text in ("9.15cm", "75.03cm", "7.52cm", "不自動套用"):
+            for text in ("80cm僅水平區段", "浴缸深度／高度未定",
+                         "無法判定浴缸完整占地", "不以未見重疊認定能安裝"):
                 self.assertIn(text, guest.inner_text())
+            self.assertEqual(page.locator(
+                'svg[data-room-canvas="bath-guest"] [data-tub-depth="unknown"]'
+            ).count(), 1)
             switcher = page.locator("nav.plan-room-navigation select[data-plan-room-select]")
             switcher.select_option("bedroom-2")
             bedroom = page.locator('[data-ac-room-cue="ac-bedroom-2"]').first
@@ -538,8 +801,9 @@ class PagesPreviewTests(unittest.TestCase):
                     railLength:rail.trackLengthCm,railHeads:rail.spotlightQuantity,
                     corridorSVG:corridorSVG.includes('data-marker-id="corridor-track-lighting"') &&
                         !/<image|\\.png|\\.jpg/.test(corridorSVG),
-                    vanity:{overlap:assessment.tubOverlapCm,gap:assessment.gapCm,
-                        clearance:assessment.sideClearanceCm,conflict:assessment.conflict},
+                    vanity:{incomplete:assessment.incomplete,
+                        tubDepthUnknown:assessment.tubDepthUnknown,
+                        conflict:assessment.conflict,warning:assessment.warning},
                     gasWarning:conditionalGasDryerWarning(byId('balcony-dryer')),
                     bedroom2:byId('ac-bedroom-2'),
                     dishwasher:byId('kitchen-plan-dishwasher'),
@@ -561,7 +825,7 @@ class PagesPreviewTests(unittest.TestCase):
             }""")
             self.assertEqual((report["quote"], report["total"],
                               report["railAmount"], report["acAmount"]),
-                             (1_959_530, 2_345_496.2, 4_684, 140_088))
+                             (1_959_530, 2_318_560.2, 4_684, 140_088))
             self.assertEqual((report["addedProducts"], report["linked"],
                               report["railLength"], report["railHeads"],
                               report["originalLength"]), (10, 0, 300, 4, 150))
@@ -569,10 +833,12 @@ class PagesPreviewTests(unittest.TestCase):
                              ["track", "track", "split-ac", "window-ac", "split-ac", "ceiling",
                               "equipment", "equipment", "equipment", "equipment"])
             self.assertTrue(report["corridorSVG"])
-            self.assertTrue(report["vanity"]["conflict"])
-            for key, expected in (("overlap", 9.15), ("gap", 75.03),
-                                  ("clearance", 7.52)):
-                self.assertAlmostEqual(report["vanity"][key], expected, places=1)
+            self.assertTrue(report["vanity"]["incomplete"])
+            self.assertTrue(report["vanity"]["tubDepthUnknown"])
+            self.assertFalse(report["vanity"]["conflict"])
+            self.assertIn("深度／高度未定", report["vanity"]["warning"])
+            self.assertIn("無法判定浴缸完整占地",
+                          report["vanity"]["warning"])
             self.assertIn("瓦斯", report["gasWarning"])
             self.assertIn("5.9cm", report["gasWarning"])
             self.assertIn("不得依此圖自行施工", report["gasWarning"])
@@ -632,6 +898,84 @@ class PagesPreviewTests(unittest.TestCase):
         finally:
             context.close()
 
+    def test_unknown_guest_tub_price_and_depth_do_not_fake_bathroom_clearance(self):
+        context = self.browser.new_context()
+        try:
+            page = context.new_page()
+            self.open_demo(page)
+            report = page.evaluate("""async () => {
+                const source = await globalThis.__RENOVATION_OFFLINE_STORE__.read();
+                const changed = structuredClone(source);
+                const tub = changed.items.find(item => item.id === 'bath-guest-tub');
+                Object.assign(tub, {
+                    productId:null,brandModel:'80cm坐式浴缸（型號待選）',
+                    unitPrice:null,priceSource:'',widthCm:80,depthCm:null,
+                    note:'坐式浴缸本體價與深度待選；原標準衛浴安裝仍已含，'
+                        +'新改管與淨空另核。',
+                });
+                for (const room of ['bath-main','bath-guest']) {
+                    const vanity = changed.items.find(item =>
+                        item.id === room+'-vanity');
+                    vanity.widthCm = 60;
+                    vanity.depthCm = 47;
+                }
+                const saved = await globalThis.__RENOVATION_OFFLINE_STORE__.update({
+                    ...changed,expectedRevision:source.revision,undo:null,
+                });
+                const root = new URL('../extensions/renovation-equipment/assets/',
+                    location.href);
+                const [{guestVanityAssessment,roomGeometry},
+                    {isBathroomInstallationIncluded},
+                    {calculateBudget,calculatePlanTotal,ORIGINAL_QUOTE_TWD}] =
+                    await Promise.all(['floorplan.js','bathroom-installation.js','budget.js']
+                        .map(name => import(new URL(name,root))));
+                const guest = saved.rooms.find(room => room.id === 'bath-guest');
+                const assessment = guestVanityAssessment(saved.items,roomGeometry(guest));
+                const selected = saved.items.find(item => item.id === 'bath-guest-tub');
+                const vanities = saved.items.filter(item =>
+                    ['bath-main-vanity','bath-guest-vanity'].includes(item.id));
+                return {
+                    tub:{price:selected.unitPrice,productId:selected.productId,
+                        width:selected.widthCm,depth:selected.depthCm,
+                        installation:selected.installationUnitPrice,
+                        included:isBathroomInstallationIncluded(selected)},
+                    vanities:vanities.map(item => [item.widthCm,item.depthCm]),
+                    assessment,counts:[saved.items.length,saved.products.length],
+                    delta:calculatePlanTotal(calculateBudget(saved.items,{
+                        wholePlan:true})).TWD -
+                        calculatePlanTotal(calculateBudget(source.items,{
+                            wholePlan:true})).TWD,
+                    candidateOnly:saved.products.find(product =>
+                        product.id === 'sample-product-03').unitPrice === 26936 &&
+                        saved.items.every(item => item.productId !== 'sample-product-03'),
+                    originalQuoteTWD:ORIGINAL_QUOTE_TWD,
+                    anchorsUntouched:saved.items.filter(item =>
+                        item.outletPlanPointId).every(item => {
+                        const previous = source.items.find(entry => entry.id === item.id);
+                        return JSON.stringify(item.placement) ===
+                            JSON.stringify(previous.placement);
+                    }),
+                    originalQuote:document.querySelector('#quote-baseline').textContent,
+                };
+            }""")
+            self.assertEqual(report["tub"], {
+                "price": None, "productId": None, "width": 80, "depth": None,
+                "installation": 0, "included": True,
+            })
+            self.assertEqual(report["vanities"], [[60, 47], [60, 47]])
+            self.assertEqual(report["counts"], [179, 28])
+            self.assertEqual(report["delta"], 0)
+            self.assertTrue(report["candidateOnly"])
+            self.assertEqual(report["originalQuoteTWD"], 1_959_530)
+            self.assertFalse(report["assessment"]["conflict"])
+            self.assertTrue(report["assessment"]["incomplete"])
+            self.assertIn("無法判定浴缸完整占地",
+                          report["assessment"]["warning"])
+            self.assertTrue(report["anchorsUntouched"])
+            self.assertIn("1,959,530", report["originalQuote"])
+        finally:
+            context.close()
+
     def test_bathroom_navigation_is_distinct_and_does_not_save(self):
         context = self.browser.new_context()
         try:
@@ -680,13 +1024,15 @@ class PagesPreviewTests(unittest.TestCase):
             vanity = page.locator('details.equipment[data-id="bath-main-vanity"]')
             self.assertIn("商品本體待補 · 安裝 NT$0",
                           vanity.locator("summary").inner_text())
-            for fixture_id, price in (("bath-main-urinal-u0211-a624", "3,960"),
-                                      ("bath-guest-tub", "26,936")):
+            for fixture_id, price in (("bath-main-urinal-u0211-a624", "3,960"),):
                 summary = page.locator(
                     f'details.equipment[data-id="{fixture_id}"] summary'
                 ).inner_text()
                 self.assertIn(f"商品 NT${price}", summary)
                 self.assertIn("安裝 NT$0（原報已含）", summary)
+            self.assertIn("商品本體待補 · 安裝 NT$0（原報已含）",
+                          page.locator('details.equipment[data-id="bath-guest-tub"] '
+                                       'summary').inner_text())
             special = page.locator('details.equipment[data-id="bath-main-heater"]')
             self.assertEqual(special.locator(
                 'input[data-field="installationUnitPrice"]').count(), 0)
@@ -773,7 +1119,7 @@ class PagesPreviewTests(unittest.TestCase):
             self.assertTrue(all(item["install"] == 0 for item in report["covered"]))
             self.assertFalse(report["mismatch"])
             self.assertGreaterEqual(report["linkedToilets"], 1)
-            self.assertEqual(report["before"], 2_345_496.2)
+            self.assertEqual(report["before"], 2_318_560.2)
             self.assertEqual(report["after"] - report["before"],
                              100 * report["linkedToilets"])
             self.assertEqual(report["repricedToilet"]["installationUnitPrice"], 0)
@@ -798,7 +1144,7 @@ class PagesPreviewTests(unittest.TestCase):
             )
             page.locator("#load-file-input").set_input_files(str(SAMPLE))
             page.wait_for_function(
-                "document.querySelector('#overall-total').textContent.includes('2,345,496')",
+                "document.querySelector('#overall-total').textContent.includes('2,318,560')",
                 timeout=15000,
             )
             with page.expect_download() as downloaded:
@@ -834,8 +1180,12 @@ class PagesPreviewTests(unittest.TestCase):
                                 for row in included))
             self.assertEqual(sorted(row["商品單價"] for row in included
                                     if row["商品單價"] != "待補"),
-                             ["14994", "14994", "26936", "3960"])
+                             ["14994", "14994", "3960"])
             self.assertTrue(any(row["商品單價"] == "待補" for row in included))
+            guest_tub = next(row for row in included if "坐式浴缸" in row["名稱"])
+            self.assertEqual(guest_tub["商品單價"], "待補")
+            self.assertIn("80cm", guest_tub["備註"])
+            self.assertNotIn("26936", guest_tub["商品小計"])
             self.assertIn("trplus.com.tw/p/016095417",
                           "\n".join(row["價格來源"] for row in rows))
             self.assertIn("三叉管是否內含未獲確認",
@@ -886,7 +1236,7 @@ class PagesPreviewTests(unittest.TestCase):
                 "buffer": json.dumps(old, ensure_ascii=False).encode("utf-8"),
             })
             page.wait_for_function(
-                "document.querySelector('#overall-total').textContent.includes('2,345,496')",
+                "document.querySelector('#overall-total').textContent.includes('2,318,560')",
                 timeout=15000,
             )
             normalized = page.evaluate(
@@ -936,6 +1286,28 @@ class PagesPreviewTests(unittest.TestCase):
         context = self.browser.new_context()
         try:
             old = legacy_bathroom_save()
+            items = {item["id"]: item for item in old["items"]}
+            previous_tub = next(product for product in old["products"]
+                                if product["id"] == "sample-product-03")
+            items["bath-guest-tub"].update({
+                "name": "浴缸", "brandModel": previous_tub["brandModel"],
+                "productId": previous_tub["id"],
+                "unitPrice": previous_tub["unitPrice"],
+                "priceSource": "物件資料庫（規劃價連動）；" +
+                               previous_tub["priceSource"],
+                "widthCm": 110, "depthCm": 70, "orientation": 270,
+                "note": "舊公開示例浴缸；尺寸與排水需現勘。",
+            })
+            for room in ("bath-main", "bath-guest"):
+                items[f"{room}-vanity"]["depthCm"] = 35
+                items[f"{room}-vanity"]["note"] = "舊公開示例浴櫃暫位；管線待核。"
+            items["bath-guest-vanity"]["placement"]["x"] = .474
+            for key, y in (("tower", 32), ("return", 99.5)):
+                item = items[f"kitchen-plan-{key}"]
+                item["placement"] = {"x": 238 / 289, "y": y / 165}
+                item["name"] = ("右端電器高櫃（暫估）" if key == "tower"
+                                else "L 型短邊訂製櫃（暫估）")
+                item["note"] = "舊公開示例的訂製櫃暫位，未報價。"
             old["revision"] = 7
             next(room for room in old["rooms"] if room["id"] ==
                  "kitchen")["ceilingHeightCm"] = 275
@@ -960,6 +1332,12 @@ class PagesPreviewTests(unittest.TestCase):
                              INCLUDED_BATHROOM_IDS)
             self.assertEqual(page.locator("#overall-total").inner_text(),
                              "NT$2,345,496.2")
+            self.assertEqual(next(item for item in state["items"]
+                                  if item["id"] == "bath-guest-tub")["unitPrice"],
+                             26936)
+            self.assertEqual(next(item for item in state["items"]
+                                  if item["id"] == "kitchen-plan-tower")["placement"],
+                             {"x": 238 / 289, "y": 32 / 165})
             stored = json.loads(page.evaluate(
                 "localStorage.getItem('renovation-equipment-offline-v1:' + location.pathname)"
             ))
@@ -1014,7 +1392,7 @@ class PagesPreviewTests(unittest.TestCase):
             )
             page.locator("#load-file-input").set_input_files(str(SAMPLE))
             page.wait_for_function(
-                "document.querySelector('#overall-total').textContent.includes('2,345,496')",
+                "document.querySelector('#overall-total').textContent.includes('2,318,560')",
                 timeout=15000,
             )
             with page.expect_download() as download:
@@ -1053,7 +1431,7 @@ class PagesPreviewTests(unittest.TestCase):
                 return state.rooms.find(room => room.id === 'kitchen').ceilingHeightCm ===
                     null && state.items.length === 179;
             }""", timeout=15000)
-            self.assertEqual(page.locator("#overall-total").inner_text(), "NT$2,345,496.2")
+            self.assertEqual(page.locator("#overall-total").inner_text(), "NT$2,318,560.2")
         finally:
             context.close()
 
@@ -1082,7 +1460,7 @@ class PagesPreviewTests(unittest.TestCase):
             gas = next(item for item in rotated["items"] if item["id"] ==
                        "kitchen-plan-gas")
             self.assertIsNone(gas["unitPrice"])
-            self.assertEqual(page.locator("#overall-total").inner_text(), "NT$2,345,496.2")
+            self.assertEqual(page.locator("#overall-total").inner_text(), "NT$2,318,560.2")
             page.locator("#undo-last").click()
             page.wait_for_function("""async () => {
                 const state = await globalThis.__RENOVATION_OFFLINE_STORE__.read();
@@ -1135,7 +1513,7 @@ class PagesPreviewTests(unittest.TestCase):
                 return Math.abs(restored.x-original.x) +
                     Math.abs(restored.y-original.y) < .000001;
             }""", arg=original, timeout=15000)
-            self.assertEqual(page.locator("#overall-total").inner_text(), "NT$2,345,496.2")
+            self.assertEqual(page.locator("#overall-total").inner_text(), "NT$2,318,560.2")
         finally:
             context.close()
 

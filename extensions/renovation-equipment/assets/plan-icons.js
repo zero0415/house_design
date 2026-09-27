@@ -1,5 +1,6 @@
 import { FURNITURE_TEMPLATES } from "./furniture.js";
 import { renderKitchenIcon } from "./kitchen-icons.js";
+import { isUnknownDepthGuestTub } from "./guest-bath-plan.js";
 
 const FURNITURE_BY_NAME = new Map(Object.entries(FURNITURE_TEMPLATES)
     .map(([type, template]) => [template.name, type]));
@@ -31,6 +32,16 @@ export function renderObjectIcon(item, width, height) {
     if (!kind) return "";
     if (!(Number.isFinite(width) && width > 0 && Number.isFinite(height) && height > 0)) {
         throw new RangeError("物件圖示缺少有效的占地寬深。");
+    }
+    if (isUnknownDepthGuestTub(item)) {
+        return `<g class="object-icon unknown-depth-tub" data-tub-depth="unknown">
+            <title>坐式浴缸：${item.widthCm}cm僅水平概念區段；
+                虛線帶高度不是實機深度，不可據此判定占地</title>
+            <rect x="${-width / 2}" y="${-height / 2}"
+                width="${width}" height="${height}" rx="2"/>
+            <text text-anchor="middle" x="7" y="-2">${item.widthCm}cm區段</text>
+            <text text-anchor="middle" x="7" y="8">深度未定</text>
+        </g>`;
     }
     const kitchen = renderKitchenIcon(item, width, height);
     if (kitchen) return kitchen;

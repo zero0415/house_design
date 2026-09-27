@@ -2097,8 +2097,11 @@ function renderVanityWarning(items) {
     const overlap = Number.isFinite(assessment.tubOverlapCm)
         ? `與浴缸圖示約重疊 ${assessment.tubOverlapCm.toFixed(2)}cm` : "淨空待量";
     return `<div class="plan-overlap-alert ac-planning-warning" role="alert"
-        data-vanity-warning="bath-guest-vanity"><strong>客浴浴櫃：${assessment.conflict
-            ? `${overlap}，原位保留待重排` : "條件式暫位，淨空待現勘"}</strong>
+        data-vanity-warning="bath-guest-vanity"><strong>客浴浴櫃：${assessment.incomplete
+            ? assessment.conflict
+                ? "浴缸深度未定且與馬桶圖示相交，非可施工"
+                : "深度／淨距未定，非可施工" : assessment.conflict
+                ? `${overlap}，原位保留待重排` : "條件式暫位，淨空待現勘"}</strong>
         <details class="warning-details"><summary>查看浴缸、馬桶間隙與施工限制</summary>
             <p>${escapeHtml(assessment.warning)}</p></details></div>`;
 }
@@ -2502,7 +2505,8 @@ function renderPlanView() {
                 室外冷氣、陽台燈及外推鐵窗上的${platformDryer &&
                     conditionalGasDryerWarning(platformDryer) ? "瓦斯" : ""}烘衣機須現場核對
                 合法性、承重、排氣、固定、排水、防護與實價；
-                客浴浴櫃和浴缸的實際淨空待現勘，不自行移位。</p>
+                客浴浴櫃的圖面標位不表示水管已移；與浴缸、馬桶的
+                實際淨空須現勘核定。</p>
             ${outside ? `<div class="outside-rooms"><strong>另加的房間：</strong>${outside}</div>` : ""}
             ${reference}
         </section>`;
@@ -2754,8 +2758,9 @@ function renderPlanView() {
                 ? "選定瓦斯機深度 72.1cm，毛深餘量僅約 5.9cm；瓦斯安全與排氣路徑未核。"
                 : "機型與所需供能、排氣／排水方式待核。"}
             鐵窗承重、合法性及防雨固定須現勘，不得據此圖直接施工。</p>` : ""}
-        ${room.id === "bath-guest" ? `<p class="door-legend">乾濕分離玻璃門已移到下方淋浴區，
-            避開浴缸；走廊側客浴入口門維持原圖位置。實際淨寬與門片開啟仍須現場核對。</p>` : ""}
+        ${room.id === "bath-guest" ? `<p class="door-legend">乾濕分離玻璃門暫標下方淋浴區，
+            走廊側客浴入口門維持原圖位置；與80cm浴缸水平區段、壁掛浴櫃及馬桶
+            的實際門扇行程和淨距尚未核定，須現場丈量。</p>` : ""}
         ${room.id === "bath-main" || room.id === "bath-guest"
             ? `<p class="door-legend"><span class="wet-dry-key"></span>青藍虛線標乾濕分離（一字）
                 玻璃隔屏，門洞處以玻璃門線表示；原報價每間 22,000 元加防爆膜 3,000 元，
