@@ -1794,3 +1794,56 @@ p { margin: 6px 0 10px; }
     .product-card { grid-template-columns: 1fr 1fr; }
     .product-description, .product-price { grid-column: 1 / -1; }
 }
+.electrical-sheet {
+    min-width: 0; padding: 16px; border: 1px solid #cbd2d9;
+    border-radius: 12px; background: #fff; color: #24313d;
+}
+.electrical-sheet p, .electrical-sheet li,
+.electrical-sheet summary, .sheet-legend {
+    font-size: 14px; line-height: 1.65; overflow-wrap: anywhere;
+}
+.sheet-legend {
+    display: flex; flex-wrap: wrap; gap: 8px 20px;
+    padding: 12px; background: #f1f4f6;
+}
+.sheet-caution, .sheet-warnings { color: #a12424; font-weight: 600; }
+.sheet-warnings, .sheet-schedule { margin: 12px 0; }
+.sheet-schedule li { margin: 12px 0; }
+.sheet-scroll {
+    overflow: auto; max-height: 80vh; border: 1px solid #bbc5cc;
+    background: #fafafa;
+}
+.sheet-scroll .overview-svg {
+    display: block; width: 1000px; max-width: none; height: auto;
+}
+.sheet-scroll .zone-floor { fill: #f4f5f6; stroke: #9aa3ac; }
+.sheet-scroll .plan-zone { cursor: default; }
+.sheet-scroll .zone-grid, .sheet-scroll .plan-scale { display: none; }
+.sheet-scroll .plan-zone-label { fill: #687581; font-size: 18px; }
+.sheet-scroll .diagram-point-label { display: none; }
+.sheet-scroll .diagram-point .icon-diagram {
+    fill: currentColor; stroke: currentColor;
+}
+.sheet-marker { stroke: currentColor; fill: #fff; stroke-width: 2; }
+.sheet-marker-label {
+    stroke: #fff; stroke-width: 4px; paint-order: stroke;
+    fill: currentColor; font-size: 14px; font-weight: 700;
+}
+.sheet-label-leader { fill: none; stroke: #89949e; stroke-width: 1; }
+.sheet-R { color: #af2929; }
+.sheet-B { color: #283745; }
+.sheet-C { color: #18589a; }
+.sheet-ceiling { color: #986100; }
+.sheet-recessed { color: #06736b; }
+.sheet-track { color: #734198; }
+.sheet-switch { color: #18589a; }
+.sheet-unassigned { color: #6c6262; }
+.sheet-marker:focus { outline: 3px solid #087cca; outline-offset: 4px; }
+.sheet-scroll:focus-visible, .electrical-sheet summary:focus-visible,
+.tabs button:focus-visible {
+    outline: 3px solid #087cca; outline-offset: 3px;
+}
+@media (max-width: 600px) {
+    .electrical-sheet { padding: 10px; }
+    .tabs { flex-wrap: wrap; }
+}

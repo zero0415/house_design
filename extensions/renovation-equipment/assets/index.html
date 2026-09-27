@@ -83,6 +83,8 @@
 
         <nav class="tabs" role="tablist" aria-label="設備檢視方式">
             <button type="button" data-view="plan" role="tab" aria-selected="true">格局圖</button>
+            <button type="button" data-view="outlet-sheet" role="tab" aria-selected="false">插座配置圖</button>
+            <button type="button" data-view="lighting-sheet" role="tab" aria-selected="false">燈具配置圖</button>
             <button type="button" data-view="survey" role="tab" aria-selected="false">門窗尺寸示意</button>
             <button type="button" data-view="room" role="tab" aria-selected="false">依房間</button>
             <button type="button" data-view="database" role="tab" aria-selected="false">物件資料庫</button>
@@ -109,7 +111,8 @@
         <p class="muted">線上示例的修改僅保存在<strong>此瀏覽器</strong>，
             不會修改公開儲存庫；請定期按「存檔 JSON」備份。
             離線檔首次使用須手動「讀檔 JSON」，不會上網讀取示例。</p>
-        <section id="content" aria-label="設備清單"><p class="muted">正在讀取設備資料…</p></section>
+        <section id="content" role="tabpanel" aria-label="設備清單">
+            <p class="muted">正在讀取設備資料…</p></section>
     </main>
     <script type="module" src="/app.js"></script>
 </body>

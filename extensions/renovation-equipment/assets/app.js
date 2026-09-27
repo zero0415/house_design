@@ -6,6 +6,7 @@ import {
 import { FURNITURE_TEMPLATES } from "./furniture.js";
 import { KITCHEN_SAFETY, renderKitchenReference } from "./kitchen-plan.js";
 import { renderBalconyReference } from "./balcony-plan.js";
+import { renderElectricalSheet } from "./electrical-sheets.js";
 import { OUTLET_POINT_WARNINGS } from "./outlet-diagram.js";
 import { installationQuoteProvenance, quoteProvenance } from "./quote-provenance.js";
 import {
@@ -2975,15 +2976,20 @@ function render() {
         updateUndoButton();
         for (const button of document.querySelectorAll("[data-view]")) {
             button.setAttribute("aria-selected", String(button.dataset.view === view));
+            button.tabIndex = button.dataset.view === view ? 0 : -1;
         }
-        document.querySelector("#add-item").hidden = view === "survey" || view === "database";
+        const sheetView = view === "outlet-sheet" || view === "lighting-sheet";
+        content.setAttribute("aria-labelledby", `view-${view}`);
+        document.querySelector("#add-item").hidden =
+            view === "survey" || view === "database" || sheetView;
         document.querySelector("#save-file").disabled = false;
         document.querySelector("#export-items").disabled = false;
         document.querySelector("#download-portable").hidden = isPortableMode();
         document.querySelector("#portable-note").hidden = !isPortableMode();
-        content.innerHTML = (pendingNewItem && view !== "survey" &&
+        content.innerHTML = (pendingNewItem && !sheetView && view !== "survey" &&
             view !== "database" ? renderNewItemForm() : "") +
-            (view === "survey" ? renderSurvey(survey, state.rooms)
+            (sheetView ? renderElectricalSheet(state, view)
+            : view === "survey" ? renderSurvey(survey, state.rooms)
             : view === "plan" ? renderPlanView()
                 : view === "room" ? renderRoomView()
                     : view === "database" ? renderDatabaseView() : renderDeviceView());
@@ -5441,6 +5447,21 @@ reloadButton.addEventListener("click", async () => {
 });
 
 for (const button of document.querySelectorAll("[data-view]")) {
+    button.id = `view-${button.dataset.view}`;
+    button.setAttribute("aria-controls", "content");
+    button.tabIndex = button.dataset.view === view ? 0 : -1;
+    button.addEventListener("keydown", (event) => {
+        if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+        event.preventDefault();
+        const tabs = [...document.querySelectorAll("[data-view]")];
+        const index = tabs.indexOf(button);
+        const next = event.key === "Home" ? 0 :
+            event.key === "End" ? tabs.length - 1 :
+                (index + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) %
+                    tabs.length;
+        tabs[next].click();
+        if (view === tabs[next].dataset.view) tabs[next].focus();
+    });
     button.addEventListener("click", () => {
         if (invalidInputs.size) {
             setStatus("請先修正無效數字，再切換檢視方式。", "error");

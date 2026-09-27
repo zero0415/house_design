@@ -234,11 +234,11 @@ function entryLivingWall(geometry) {
     return `<path class="entry-living-wall" d="${path.join(" ")}"/>`;
 }
 
-function renderEntryLivingPassage(overview) {
+function renderEntryLivingPassage(overview, interactive = true) {
     const { x, yStart, yEnd, label } = ENTRY_LIVING_PASSAGE;
     const y = (yStart + yEnd) / 2;
     return `<g class="${overview ? "plan-passage" : "detail-passage"}"
-        ${overview ? `data-select-room="entry" role="button" tabindex="0"
+        ${overview && interactive ? `data-select-room="entry" role="button" tabindex="0"
             aria-label="${escapeSvg(label)}"` : 'aria-hidden="true" pointer-events="none"'}>
         <title>${escapeSvg(label)}；玄關外側大門仍在原位，不新增門片報價</title>
         ${overview ? `<rect class="passage-hitbox" x="${x - 15}" y="${y - 19}"
@@ -620,7 +620,7 @@ function renderDoorDimension(door) {
     </g>`;
 }
 
-function renderDoor(door, items, overview, showDimension = true) {
+function renderDoor(door, items, overview, showDimension = true, interactive = true) {
     const chosen = selectedDoor(door, items);
     const item = items.find((entry) => entry.kind === "door" && entry.doorId === door.id);
     const source = markerQuoteProvenance(item, items);
@@ -630,7 +630,7 @@ function renderDoor(door, items, overview, showDimension = true) {
         material-${escapeSvg(chosen.material)}"
         data-door-material="${escapeSvg(chosen.material)}"
         ${quoteMarkerAttributes(source)}
-        ${overview ? `data-select-room="${escapeSvg(chosen.owner)}"
+        ${overview && interactive ? `data-select-room="${escapeSvg(chosen.owner)}"
             role="button" tabindex="0"` : source ? 'role="img" tabindex="0"' : ""}
         aria-label="${escapeSvg(chosen.label)}（${escapeSvg(chosen.materialLabel)}；
             ${chosen.quoted ? "已列原報價" : "未列門片報價"}）">
@@ -649,9 +649,9 @@ function renderDoor(door, items, overview, showDimension = true) {
     </g>`;
 }
 
-function renderWindow(window, overview) {
+function renderWindow(window, overview, interactive = true) {
     return `<g class="${overview ? "plan-window-mark" : "detail-window"}"
-        ${overview ? `data-select-room="${escapeSvg(window.roomId)}"
+        ${overview && interactive ? `data-select-room="${escapeSvg(window.roomId)}"
             role="button" tabindex="0"` : ""}
         aria-label="${escapeSvg(window.label)}">
         <title>${escapeSvg(window.label)}；準確洞口須以現場丈量核對</title>
@@ -660,7 +660,7 @@ function renderWindow(window, overview) {
     </g>`;
 }
 
-function renderBedroom2Partition(items) {
+function renderBedroom2Partition(items, interactive = true) {
     const partition = items.find((item) => item.id === BEDROOM2_PARTITION_ID);
     if (!partition) return "";
     const option = BEDROOM2_PARTITION_OPTIONS[partition.partitionMaterial];
@@ -680,10 +680,12 @@ function renderBedroom2Partition(items) {
         gapEnd < bottom ? `M${right} ${gapEnd} V${bottom}` : "",
     ].filter(Boolean).join(" ");
     return `<g class="partition-walls material-${escapeSvg(partition.partitionMaterial)}"
-        data-select-partition="${BEDROOM2_PARTITION_ID}" role="button" tabindex="0"
+        ${interactive ? `data-select-partition="${BEDROOM2_PARTITION_ID}"
+            role="button" tabindex="0"` : 'role="img"'}
         ${quoteMarkerAttributes(source)}
         aria-label="臥室2對客廳和走廊兩道輕隔間共用${escapeSvg(option.label)}，
-            合計${escapeSvg(partition.quantity ?? "待填")}坪；點選調整做法">
+            合計${escapeSvg(partition.quantity ?? "待填")}坪${interactive ?
+                "；點選調整做法" : ""}">
         <title>臥室2兩道輕隔間：${escapeSvg(option.label)}；
             原報價合計 5 坪，線條顏色和粗細不是施工牆厚；${escapeSvg(source)}</title>
         <path class="partition-wall-core"
@@ -1045,22 +1047,24 @@ function renderKitchenShortWingFill(items, geometry, scope) {
 
 export function renderOverviewPlan(rooms, items, showSource = false, activeLightIds = null,
     visibleLayers = DEFAULT_VISIBLE_LAYERS, focusedCircuitId = null,
-    planeHeightCm = 80) {
+    planeHeightCm = 80, sheetMarker = null) {
     const byRoom = new Map(rooms.map((room) => [room.id, room]));
     const renderedZones = HOUSE_ZONES.map((zone) => {
         const room = byRoom.get(zone.id);
         if (!room) return "";
         const geometry = roomGeometry(room);
         const roomItems = items.filter((item) => item.roomId === room.id);
-        const markers = roomItems.filter((item) =>
+        const markers = sheetMarker ? "" : roomItems.filter((item) =>
             item.kind !== "door" && item.placement && markerVisible(item, visibleLayers) &&
             (!isSplitAirConditioner(item) || isActiveSplitAirConditioner(item)))
             .sort((a, b) => Boolean(a.outletPlanPointId) - Boolean(b.outletPlanPointId) ||
                 kitchenDrawOrder(a, b))
             .map((item) => overviewMarker(item, geometry, room.name,
                 activeLightIds !== null, items)).join("");
-        return `<g class="plan-zone tone-${zone.tone}" data-select-room="${zone.id}"
-            role="button" tabindex="0" aria-label="放大查看${escapeSvg(room.name)}">
+        return `<g class="plan-zone tone-${zone.tone}" ${sheetMarker
+            ? `aria-label="${escapeSvg(room.name)}"`
+            : `data-select-room="${zone.id}" role="button" tabindex="0"
+                aria-label="放大查看${escapeSvg(room.name)}"`}>
             <path class="zone-floor ${zone.id === "entry" ||
                 zone.id === "living-dining" ? "entry-opening-floor" : ""}"
                 d="${zone.path}"/>
@@ -1070,7 +1074,8 @@ export function renderOverviewPlan(rooms, items, showSource = false, activeLight
             ${renderWetDryDivider(zone.id, items)}
             ${visibleLayers.furniture
                 ? renderKitchenShortWingFill(roomItems, geometry, "overview") : ""}
-            ${zone.id === "balcony" && visibleLayers.furniture ? renderBalconySink() : ""}
+            ${zone.id === "balcony" && (visibleLayers.furniture || sheetMarker)
+                ? renderBalconySink() : ""}
             ${zone.id === "ac-platform" ? renderExteriorPlatform(false, items) : ""}
             ${zone.id === "corridor"
                 ? `<text class="corridor-label" x="488" y="${zone.labelY}"
@@ -1080,14 +1085,17 @@ export function renderOverviewPlan(rooms, items, showSource = false, activeLight
                     text-anchor="middle">${escapeSvg(room.name)}</text>`}
             ${zone.id === "balcony" ? `<text class="plan-zone-area" x="${zone.labelX}"
                 y="1812" text-anchor="middle">2.3㎡</text>` : ""}
-            ${visibleLayers.outlets ? renderCircuitPairings(geometry, roomItems) : ""}
+            ${visibleLayers.outlets && !sheetMarker
+                ? renderCircuitPairings(geometry, roomItems) : ""}
             ${markers}
         </g>`;
     }).join("");
     const meter = 100 * PLAN_PIXELS_PER_CM;
     return `<svg class="overview-svg ${showSource ? "with-source" : ""}"
         viewBox="0 0 ${HOUSE_SIZE.width} ${HOUSE_SIZE.height}"
-        role="group" aria-label="依 1:60 圖面資料與牆內緣繪製的格局；每個格線 100 公分">
+        role="group" aria-label="${sheetMarker
+            ? "去識別化房屋輪廓與現況門窗的只讀配置示意；不是印刷比例或施工圖"
+            : "依 1:60 圖面資料與牆內緣繪製的格局；每個格線 100 公分"}">
         <defs><pattern id="plan-meter-grid" x="0" y="0"
             width="${meter}" height="${meter}" patternUnits="userSpaceOnUse">
             <path class="grid-line" d="M${meter} 0 H0 V${meter}"/>
@@ -1104,19 +1112,23 @@ export function renderOverviewPlan(rooms, items, showSource = false, activeLight
         ${byRoom.has("corridor") ? "" : `<path class="plan-corridor" d="${CORRIDOR_PATH}"/>
             <path class="plan-corridor-grid" d="${CORRIDOR_PATH}" fill="url(#plan-meter-grid)"/>`}
         ${renderedZones}
-        ${visibleLayers.furniture && byRoom.has("balcony") ?
+        ${(visibleLayers.furniture || sheetMarker) && byRoom.has("balcony") ?
             renderBalconyDemolition(items) : ""}
         ${byRoom.has("entry") && byRoom.has("living-dining")
-            ? renderEntryLivingPassage(true) : ""}
+            ? renderEntryLivingPassage(true, !sheetMarker) : ""}
         ${activeLightIds !== null && visibleLayers.switches && visibleLayers.lights
             ? renderPreviewConnections(rooms, items, focusedCircuitId) : ""}
-        ${renderBedroom2Partition(items)}
+        ${renderBedroom2Partition(items, !sheetMarker)}
         ${byRoom.has("corridor") ? "" : `<text class="corridor-label" x="518" y="1282"
             text-anchor="middle" transform="rotate(-90 518 1282)">走廊</text>`}
         ${doors.filter((door) => door.roomIds.some((id) => byRoom.has(id)))
-            .map((door) => renderDoor(door, items, true)).join("")}
+            .map((door) => renderDoor(door, items, true, true, !sheetMarker)).join("")}
         ${windows.filter((window) => byRoom.has(window.roomId))
-            .map((window) => renderWindow(window, true)).join("")}
+            .map((window) => renderWindow(window, true, !sheetMarker)).join("")}
+        ${sheetMarker ? rooms.filter((room) =>
+            HOUSE_ZONE_BY_ID.has(room.id)).map((room) =>
+            items.filter((item) => item.roomId === room.id).map((item) =>
+                sheetMarker(item, roomGeometry(room), room.name)).join("")).join("") : ""}
         ${visibleLayers.furniture ? items.filter((item) => isActiveSplitAirConditioner(item) &&
             item.outdoorPlacement && byRoom.has(item.roomId))
             .map((item) => renderOutdoorAC(item, true)).join("") : ""}

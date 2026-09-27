@@ -401,6 +401,253 @@ class PagesPreviewTests(unittest.TestCase):
         finally:
             browser.close()
 
+    def test_electrical_tabs_use_public_saved_points_and_never_write(self):
+        context = self.browser.new_context(viewport={"width": 1280, "height": 950})
+        try:
+            page = context.new_page()
+            errors = []
+            requests = []
+            page.on("pageerror", lambda error: errors.append(str(error)))
+            page.on("request", lambda request: requests.append(
+                (request.method, request.url)) if request.url.startswith(
+                    ("http:", "https:")) else None)
+            self.open_demo(page)
+            before = page.evaluate("globalThis.__RENOVATION_OFFLINE_STORE__.read()")
+            budget = page.locator(".budget").inner_text()
+            self.assertIsNone(page.evaluate(
+                "localStorage.getItem('renovation-equipment-offline-v1:' + location.pathname)"
+            ))
+            self.assertEqual(page.get_by_role("tab").count(), 7)
+            plan = page.get_by_role("tab", name="格局圖", exact=True)
+            outlet = page.get_by_role("tab", name="插座配置圖", exact=True)
+            lighting = page.get_by_role("tab", name="燈具配置圖", exact=True)
+            plan.focus()
+            page.keyboard.press("ArrowRight")
+            self.assertTrue(outlet.evaluate("node => node === document.activeElement"))
+            self.assertEqual(outlet.get_attribute("aria-selected"), "true")
+            self.assertEqual(outlet.get_attribute("tabindex"), "0")
+            self.assertEqual(page.locator("#content").get_attribute("role"),
+                             "tabpanel")
+            self.assertEqual(page.locator("#content").get_attribute("aria-labelledby"),
+                             "view-outlet-sheet")
+            self.assertTrue(page.locator("#add-item").is_hidden())
+            points = page.locator("[data-sheet-point]").evaluate_all(
+                "nodes => nodes.map(node => node.dataset.sheetPoint)"
+            )
+            self.assertEqual(len(points), 67)
+            self.assertEqual(len(set(points)), 67)
+            for prefix, amount in (("R", 51), ("B", 9), ("C", 7)):
+                self.assertEqual(
+                    sorted(point for point in points if point.startswith(prefix)),
+                    [f"{prefix}{number:02d}" for number in range(1, amount + 1)],
+                )
+            self.assertIn("專用迴路資料 9 筆", page.locator(
+                ".sheet-legend").inner_text())
+            self.assertEqual(page.locator(
+                ".electrical-sheet .plan-zone").count(), 13)
+            self.assertEqual(page.locator(
+                ".electrical-sheet [data-circuit-link-id], "
+                ".electrical-sheet [data-select-room], "
+                ".electrical-sheet [data-select-partition], "
+                ".electrical-sheet [data-action]").count(), 0)
+            self.assertEqual(page.locator(
+                ".electrical-sheet .fixed-balcony-sink").count(), 1)
+            self.assertEqual(page.locator(
+                '.electrical-sheet [data-demolition-status="proposed"]').count(), 1)
+            self.assertIn("衝突", page.locator(
+                '[data-sheet-point="R33"]').get_attribute("aria-label"))
+            warnings = page.locator(".sheet-warnings")
+            self.assertIn("R08／R33／R42／B05",
+                          warnings.locator("summary").inner_text())
+            self.assertIsNone(warnings.get_attribute("open"))
+            warnings.locator("summary").click()
+            self.assertIn("保留來源位置", warnings.inner_text())
+            warnings.locator("summary").click()
+            label_collisions = page.locator(
+                "[data-sheet-point] .sheet-marker-label").evaluate_all("""nodes => {
+                const boxes = nodes.map(node => node.getBoundingClientRect());
+                return boxes.flatMap((a, i) => boxes.slice(i + 1).flatMap((b, j) =>
+                    a.right <= b.left || b.right <= a.left ||
+                    a.bottom <= b.top || b.bottom <= a.top ? [] :
+                    [[nodes[i].textContent, nodes[i + j + 1].textContent]]));
+            }""")
+            self.assertEqual(label_collisions, [])
+            outlet.focus()
+            page.keyboard.press("ArrowRight")
+            self.assertTrue(lighting.evaluate(
+                "node => node === document.activeElement"))
+            self.assertEqual(page.locator(
+                "#content").get_attribute("aria-labelledby"), "view-lighting-sheet")
+            self.assertEqual(page.locator("[data-sheet-light]").count(), 16)
+            self.assertEqual(page.locator("[data-light-head]").count(), 19)
+            self.assertEqual(page.locator("[data-sheet-switch]").count(), 14)
+            self.assertIn("移除開關 2", page.locator(
+                ".electrical-sheet").inner_text())
+            self.assertIn("控制對象未核", page.locator(
+                ".sheet-caution").inner_text())
+            self.assertIn("W 不能推算照度", page.locator(
+                ".sheet-caution").inner_text())
+            self.assertEqual(page.locator(
+                ".electrical-sheet [data-preview-switch-id], "
+                ".electrical-sheet [data-preview-light-id], "
+                ".electrical-sheet .lighting-preview").count(), 0)
+            schedule = page.locator(".sheet-schedule")
+            self.assertIsNone(schedule.get_attribute("open"))
+            schedule.locator("summary").focus()
+            page.keyboard.press("Enter")
+            self.assertIsNotNone(schedule.get_attribute("open"))
+            self.assertIn("lm待核／°待核", schedule.inner_text())
+            page.keyboard.press("Space")
+            self.assertIsNone(schedule.get_attribute("open"))
+            dynamic = page.evaluate("""async () => {
+                const root = new URL(
+                    '../extensions/renovation-equipment/assets/electrical-sheets.js',
+                    location.href);
+                const {electricalSheetData,renderElectricalSheet} = await import(root);
+                const original = await globalThis.__RENOVATION_OFFLINE_STORE__.read();
+                const noProduct = structuredClone(original);
+                noProduct.products = [];
+                const changed = structuredClone(original);
+                changed.items.find(item => item.switchType &&
+                    item.switchPlanStatus === 'active').switchPlanStatus = 'removed';
+                changed.items.find(item => item.lightType === 'track')
+                    .spotlightQuantity = 2;
+                const counts = electricalSheetData(changed);
+                return {
+                    missing:renderElectricalSheet(noProduct,'lighting-sheet')
+                        .includes('已連結商品不存在，規格待核'),
+                    active:counts.activeSwitches.length,
+                    removed:counts.removedSwitches.length,
+                    heads:counts.heads,
+                };
+            }""")
+            self.assertEqual(dynamic, {
+                "missing": True, "active": 13, "removed": 3, "heads": 17,
+            })
+            page.set_viewport_size({"width": 390, "height": 844})
+            self.assertGreaterEqual(page.locator(".sheet-legend").evaluate(
+                "node => parseFloat(getComputedStyle(node).fontSize)"), 14)
+            scroll = page.locator(".sheet-scroll")
+            self.assertTrue(scroll.evaluate(
+                "node => node.scrollWidth > node.clientWidth && "
+                "node.scrollHeight > node.clientHeight"))
+            scroll.evaluate("node => {node.scrollLeft = 400; node.scrollTop = 1500}")
+            self.assertTrue(scroll.evaluate(
+                "node => node.scrollLeft > 0 && node.scrollTop > 0"))
+            sheet_width = page.evaluate("document.documentElement.scrollWidth")
+            lighting.focus()
+            page.keyboard.press("Home")
+            self.assertTrue(plan.evaluate("node => node === document.activeElement"))
+            self.assertLessEqual(sheet_width, page.evaluate(
+                "document.documentElement.scrollWidth"))
+            page.keyboard.press("End")
+            self.assertTrue(page.get_by_role("tab", name="已放置物件清單",
+                                             exact=True).evaluate(
+                "node => node === document.activeElement"))
+            outlet.focus()
+            page.keyboard.press("Space")
+            self.assertEqual(outlet.get_attribute("aria-selected"), "true")
+            self.assertEqual(page.evaluate(
+                "globalThis.__RENOVATION_OFFLINE_STORE__.read()"), before)
+            self.assertEqual(page.locator(".budget").inner_text(), budget)
+            self.assertIsNone(page.evaluate(
+                "localStorage.getItem('renovation-equipment-offline-v1:' + location.pathname)"
+            ))
+            self.assertEqual([method for method, _ in requests if method != "GET"],
+                             [])
+            self.assertTrue(all(url.startswith(self.base) for _, url in requests))
+            self.assertEqual(errors, [])
+        finally:
+            context.close()
+
+    def test_electrical_tabs_offline_edge_import_and_undo_are_read_only(self):
+        if not EDGE:
+            self.skipTest("Microsoft Edge is not installed")
+        browser = self.playwright.chromium.launch(
+            executable_path=EDGE, headless=True
+        )
+        try:
+            context = browser.new_context(accept_downloads=True)
+            try:
+                previous = previous_public_balcony_save()
+                previous["undo"] = {
+                    key: deepcopy(previous[key]) for key in
+                    ("rooms", "items", "products")
+                }
+                previous["revision"] = 7
+                next(room for room in previous["rooms"] if room["id"] ==
+                     "kitchen")["ceilingHeightCm"] = 275
+                page = context.new_page()
+                errors = []
+                requests = []
+                page.on("pageerror", lambda error: errors.append(str(error)))
+                page.on("request", lambda request: requests.append(request.url)
+                        if request.url.startswith(("http:", "https:")) else None)
+                page.on("dialog", lambda dialog: dialog.accept())
+                page.goto(PORTABLE.as_uri())
+                page.wait_for_function("Boolean(globalThis.__RENOVATION_OFFLINE_STORE__)")
+                page.locator("#load-file-input").set_input_files({
+                    "name": "previous-public-v5.json",
+                    "mimeType": "application/json",
+                    "buffer": json.dumps(previous, ensure_ascii=False).encode("utf-8"),
+                })
+                page.wait_for_function("""async () =>
+                    (await globalThis.__RENOVATION_OFFLINE_STORE__.read())
+                        .items.length === 179
+                """, timeout=15000)
+                imported = page.evaluate(
+                    "globalThis.__RENOVATION_OFFLINE_STORE__.read()"
+                )
+                self.assertEqual(imported["revision"], 1)
+                self.assertIsNotNone(imported["undo"])
+                budget = page.locator(".budget").inner_text()
+                storage_before = page.evaluate(
+                    "localStorage.getItem('renovation-equipment-offline-v1:' + location.pathname)"
+                )
+                page.get_by_role("tab", name="插座配置圖", exact=True).click()
+                self.assertEqual(page.locator("[data-sheet-point]").count(), 67)
+                self.assertEqual(page.locator(
+                    '.electrical-sheet [data-demolition-status="proposed"]').count(), 0)
+                page.get_by_role("tab", name="燈具配置圖", exact=True).click()
+                self.assertEqual(page.locator("[data-sheet-light]").count(), 16)
+                self.assertEqual(page.locator("[data-light-head]").count(), 19)
+                self.assertEqual(page.locator("[data-sheet-switch]").count(), 14)
+                self.assertEqual(page.evaluate(
+                    "globalThis.__RENOVATION_OFFLINE_STORE__.read()"), imported)
+                self.assertEqual(page.locator(".budget").inner_text(), budget)
+                self.assertEqual(page.evaluate(
+                    "localStorage.getItem('renovation-equipment-offline-v1:' + location.pathname)"
+                ), storage_before)
+                with page.expect_download() as download:
+                    page.locator("#save-file").click()
+                exported = json.loads(Path(
+                    download.value.path()).read_text(encoding="utf-8"))["state"]
+                self.assertEqual(
+                    {key: exported[key] for key in ("rooms", "items", "products", "undo")},
+                    {key: imported[key] for key in ("rooms", "items", "products", "undo")},
+                )
+                page.locator("#undo-last").click()
+                page.wait_for_function("""async () =>
+                    (await globalThis.__RENOVATION_OFFLINE_STORE__.read())
+                        .rooms.find(room => room.id === 'kitchen')
+                            .ceilingHeightCm === null
+                """, timeout=15000)
+                restored = page.evaluate(
+                    "globalThis.__RENOVATION_OFFLINE_STORE__.read()"
+                )
+                self.assertEqual(
+                    {key: restored[key] for key in ("rooms", "items", "products")},
+                    imported["undo"],
+                )
+                self.assertEqual(page.locator("[data-sheet-light]").count(), 16)
+                self.assertEqual(page.locator(".budget").inner_text(), budget)
+                self.assertEqual(requests, [])
+                self.assertEqual(errors, [])
+            finally:
+                context.close()
+        finally:
+            browser.close()
+
     def test_public_helpers_keep_derived_data_and_reject_partial_layouts(self):
         context = self.browser.new_context()
         try:

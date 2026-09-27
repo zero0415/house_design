@@ -74,6 +74,11 @@ class PublicSnapshotTests(unittest.TestCase):
         self.assertIn("非可施工", readme)
         self.assertIn("不內嵌任何影像", readme)
         self.assertIn("泥作水槽", quote)
+        for value in ("插座配置圖", "燈具配置圖", "19 個已知發光點",
+                      "14 筆", "9 條專用迴路", "不依參考圖臆造",
+                      "沒有複製或轉繪其頁面"):
+            with self.subTest(utility=value):
+                self.assertIn(value, readme)
 
     def test_sample_is_deidentified_without_losing_the_plan(self):
         state = json.loads(SAMPLE.read_text(encoding="utf-8"))
@@ -481,7 +486,7 @@ class PublicSnapshotTests(unittest.TestCase):
         for name in ("kitchen-plan.js", "kitchen-icons.js", "outlet-diagram.js",
                      "bathroom-installation.js", "laundry-notes.js",
                      "quote-provenance.js", "guest-bath-plan.js",
-                     "balcony-plan.js"):
+                     "balcony-plan.js", "electrical-sheets.js"):
             self.assertIn(f"assets/{name}", {entry["path"] for entry in bundle["modules"]})
         for name in ("corridor-plan.js", "air-conditioning-plan.js"):
             self.assertTrue((ROOT / "extensions" / "renovation-equipment" / "assets" /
