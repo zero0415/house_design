@@ -5162,13 +5162,20 @@ try {
     state = await fetchState();
     resetActionTracking();
     render();
-    setStatus("已載入本機清單", "saved");
+    setStatus(globalThis.__RENOVATION_OFFLINE_STORE__?.demo
+        ? "已載入規劃；修改只保存在此瀏覽器，不會更新公開儲存庫，請下載 JSON 備份。"
+        : "已載入本機清單", "saved");
 } catch (error) {
     if (isPortableMode() && error.noState) {
-        content.textContent = "尚未讀取裝修規劃。請按上方「讀檔 JSON」選擇設備規劃存檔。";
+        const demoFailed = error.demoLoadFailed || error.demoStorageUnavailable;
+        content.textContent = demoFailed
+            ? "公開示例尚未載入；仍可按上方「讀檔 JSON」手動選擇設備規劃存檔。"
+            : "尚未讀取裝修規劃。請按上方「讀檔 JSON」選擇設備規劃存檔。";
         document.querySelector("#download-portable").hidden = true;
         document.querySelector("#portable-note").hidden = false;
-        setStatus("請先讀入 JSON 存檔；此離線 HTML 不含個人設備資料。");
+        setStatus(demoFailed ? error.message
+            : "請先讀入 JSON 存檔；此離線 HTML 不含個人設備資料。",
+        demoFailed ? "error" : "info");
     } else {
         content.textContent = "設備資料載入失敗，請檢查檔案或擴充功能日誌。";
         setStatus(error.message, "error");

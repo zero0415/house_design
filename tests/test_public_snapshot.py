@@ -8,6 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SAMPLE = ROOT / "files" / "設備規劃.json"
 QUOTE = ROOT / "files" / "裝修工程報價-去識別化.md"
 PORTABLE = ROOT / "portable" / "裝修設備規劃.html"
+PAGES_ENTRY = ROOT / "index.html"
 ADDRESS = re.compile(r"[\u4e00-\u9fff]{2,10}(?:路|街)\d+(?:之\d+)?號(?:\d+樓)?")
 EMAIL = re.compile(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}")
 PHONE = re.compile(r"(?<!\d)09\d{8}(?!\d)|(?<!\d)0[2-8][- ]?\d{7,8}(?!\d)")
@@ -68,6 +69,21 @@ class PublicSnapshotTests(unittest.TestCase):
         self.assertNotRegex(html, r'(?i)<script[^>]+src=|<link[^>]+rel="stylesheet"')
         self.assertNotIn(SAMPLE.read_text(encoding="utf-8")[:100], html)
         self.assertLess(PORTABLE.stat().st_size, 2_000_000)
+
+    def test_pages_entry_is_opt_in_and_same_origin(self):
+        entry = PAGES_ENTRY.read_text(encoding="utf-8")
+        destination = "portable/裝修設備規劃.html?demo=pages"
+        self.assertIn(f'content="0; url={destination}"', entry)
+        self.assertIn(f'href="{destination}"', entry)
+        bootstrap = (ROOT / "tools" / "portable-bootstrap.js").read_text(encoding="utf-8")
+        self.assertIn('searchParams.get("demo") === "pages"', bootstrap)
+        self.assertIn('location.protocol === "https:" || location.protocol === "http:"',
+                      bootstrap)
+        self.assertIn('new URL("../files/設備規劃.json", location.href)', bootstrap)
+        self.assertIn('sampleURL.origin !== location.origin', bootstrap)
+        self.assertIn('credentials: "omit", redirect: "error", mode: "same-origin"', bootstrap)
+        self.assertNotIn(SAMPLE.read_text(encoding="utf-8")[:100],
+                         PORTABLE.read_text(encoding="utf-8"))
 
     def test_published_files_are_text_without_direct_contacts(self):
         prohibited = {".pdf", ".png", ".jpg", ".jpeg", ".webp", ".gif", ".tif", ".tiff"}

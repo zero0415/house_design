@@ -17,12 +17,22 @@ try {
     const { validateState } = await import(moduleURLs.get("state-browser.mjs"));
     const { PLANNER_STATE_VERSION } = await import(moduleURLs.get("assets/socket-plan.js"));
     const storageKey = `renovation-equipment-offline-v1:${location.pathname}`;
+    const pagesDemo = (location.protocol === "https:" || location.protocol === "http:") &&
+        new URL(location.href).searchParams.get("demo") === "pages";
+    if (pagesDemo) {
+        document.querySelector("#portable-note").textContent =
+            "這是去識別化公開示例。修改只保存在此瀏覽器，不會修改公開儲存庫；" +
+            "請定期按「存檔 JSON」下載備份。其他瀏覽器或清除暫存後，未匯出的修改無法還原。";
+    }
     let current = null;
+    let sampleIsTransient = false;
     let damagedStorage = null;
     let unavailableStorage = null;
+    let sampleLoadError = null;
+    let storedText = null;
     try {
-        const saved = localStorage.getItem(storageKey);
-        if (saved) current = validateState(JSON.parse(saved));
+        storedText = localStorage.getItem(storageKey);
+        if (storedText !== null) current = validateState(JSON.parse(storedText));
     } catch (error) {
         if (error.name === "SecurityError") unavailableStorage = error;
         else damagedStorage = error;
@@ -31,27 +41,62 @@ try {
         if (event.key !== storageKey) return;
         if (event.newValue === null) {
             current = null;
+            sampleIsTransient = false;
             damagedStorage = null;
             return;
         }
         try {
             current = validateState(JSON.parse(event.newValue));
+            sampleIsTransient = false;
             damagedStorage = null;
         } catch (error) {
+            current = null;
             damagedStorage = error;
         }
     });
 
+    if (pagesDemo && storedText === null && !damagedStorage && !unavailableStorage) {
+        try {
+            const sampleURL = new URL("../files/設備規劃.json", location.href);
+            if (sampleURL.origin !== location.origin) {
+                throw new Error("公開示例必須與規劃器位於同一網站。");
+            }
+            const response = await fetch(sampleURL, {
+                cache: "no-store", credentials: "omit", redirect: "error", mode: "same-origin",
+            });
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const sample = validateState(await response.json());
+            if (sample.revision !== 0 || sample.undo !== null) {
+                throw new Error("公開示例存檔含有編輯紀錄，請檢查範例資料。");
+            }
+            const latestSaved = localStorage.getItem(storageKey);
+            if (latestSaved !== null) {
+                current = validateState(JSON.parse(latestSaved));
+            } else if (!current) {
+                current = sample;
+                sampleIsTransient = true;
+            }
+        } catch (error) {
+            sampleLoadError = error;
+        }
+    }
+
     globalThis.__RENOVATION_OFFLINE_STORE__ = {
+        demo: pagesDemo,
         async read() {
             if (damagedStorage) {
                 throw new Error("瀏覽器暫存資料無法驗證；請用「讀檔 JSON」還原存檔。");
             }
             if (!current) {
-                const error = new Error(unavailableStorage
-                    ? "瀏覽器不允許自動儲存；請讀入 JSON 並定期下載存檔。"
-                    : "請先讀入 JSON 設備規劃存檔。");
+                const error = new Error(sampleLoadError
+                    ? `公開示例自動載入失敗：${sampleLoadError.message}；` +
+                        "請按「讀檔 JSON」手動選擇示例存檔。"
+                    : unavailableStorage
+                        ? "瀏覽器不允許自動儲存；請讀入 JSON 並定期下載存檔。"
+                        : "請先讀入 JSON 設備規劃存檔。");
                 error.noState = true;
+                error.demoLoadFailed = Boolean(sampleLoadError);
+                error.demoStorageUnavailable = Boolean(pagesDemo && unavailableStorage);
                 throw error;
             }
             return structuredClone(current);
@@ -62,7 +107,7 @@ try {
             }
             try {
                 const saved = localStorage.getItem(storageKey);
-                if (saved) {
+                if (saved !== null) {
                     let latest;
                     try {
                         latest = validateState(JSON.parse(saved));
@@ -71,8 +116,10 @@ try {
                             throw new Error("瀏覽器暫存資料無法驗證；請用 JSON 存檔還原。");
                         }
                     }
-                    if (latest && (!current || latest.revision !== current.revision)) {
+                    if (latest && (sampleIsTransient || !current ||
+                        latest.revision !== current.revision)) {
                         current = latest;
+                        sampleIsTransient = false;
                         const conflict = new Error(
                             "另一個離線分頁已更新規劃；請重新載入後再讀檔或編輯。");
                         conflict.conflict = true;
@@ -109,6 +156,8 @@ try {
                     "目前資料只在此分頁，請立即按「存檔 JSON」下載備份。";
             }
             current = structuredClone(next);
+            sampleIsTransient = false;
+            sampleLoadError = null;
             return { ...next, storageWarning: warning };
         },
     };
