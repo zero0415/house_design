@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>裝修設備規劃</title>
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+    <main class="layout">
+        <header class="masthead">
+            <div>
+                <p class="eyebrow">去識別化規劃示例</p>
+                <h1>裝修設備規劃</h1>
+                <p class="muted">新配置可拖放家具、編排設備；現況門窗與尺寸格線另頁對照。</p>
+                <p class="muted">公開版保留圖面幾何與報價作示例閱讀；
+                    參考圖為重新繪製的示意，未收錄原始掃描或個人資料，不能作施工圖。</p>
+            </div>
+            <span id="save-status" role="status" aria-live="polite" data-kind="info">正在載入…</span>
+        </header>
+
+        <section class="budget" aria-label="設備與家具預算">
+            <div class="quote-baseline">
+                <strong id="quote-baseline">—</strong><span>原工程報價</span>
+            </div>
+            <div class="overall-total">
+                <strong id="overall-total">—</strong><span>規劃後總額（台幣暫計）</span>
+                <small id="overall-note"></small>
+            </div>
+            <div><strong id="priced-total">—</strong><span>規劃小計（含原報價明細）</span></div>
+            <div><strong id="additional-total">—</strong><span>增加支出（未報價＋已報項目價差）</span></div>
+            <div><strong id="reduction-total">—</strong><span>減項（已報項目降價）</span></div>
+            <div><strong id="pending-count">—</strong><span>尚缺數量、單價或軌道長度</span></div>
+        </section>
+        <p class="muted quote-note">原工程報價已含 9 扇門片 114,500 元、兩間乾濕分離玻璃 44,000 元與防爆膜 6,000 元（門片工程共 164,500 元）。
+            輕隔間工程含臥室2兩道牆 5 坪 × 7,000 元＝35,000 元，
+            另含主浴／工作室滑門軌道 1.6 米 × 1,800 元＝2,880 元；切換門與隔間只試算價差，不重複計原報項。
+            水電工程已含單／雙開關 15 個 × 2,250 元＝33,750 元，及廚衛崁燈 6 個 × 950 元＝5,700 元（含燈具、配線與安裝）；
+            新增開關暫按原單價追加、移除原配置暫按原單價列減項，能否扣款及新線路實價待廠商確認；
+            工作室原陽台側室內開關已從規劃移除，陽台新增一個戶外防潮款暫位，
+            兩筆各 NT$2,250 僅作加減試算；戶外防水材料與配線補差另待報價。
+            插座迴路 50 個 × 1,800 元＝90,000 元，
+            專用迴路另列 7 條 × 4,500 元＝31,500 元。
+            插座均以一般插孔表示，每條獨立的專用迴路另配對一個實體插座；
+            兩筆原報額度不得重複加價。插座可像其他物件刪減，
+            每個先按 1,800 元試算差額；迴路每條先按 4,500 元估，
+            但原報 50 個／7 條與工程總價基準不改。
+            若數量不符 50 個，須再核對點位、工資與增減價；
+            迴路變動須確認配電容量與跳電風險，建議至少 7 條。
+            三條原報冷氣額度暫配主臥、臥室1與客餐廳，
+            其餘兩台冷氣、鐵窗烘衣機等高負載仍須增列／重分配迴路；
+            浴室原報暖風機改新風機，電氣規格與抵用須重核。
+            每顆崁燈暫拆燈具約 200 元＋安裝約 750 元僅供換款試算，非原報價材料拆價。
+            原 PDF「暖風機安裝」兩間共 5,000 元，依屋主要求暫借作真正室外進氣新風機的安裝規劃，
+            廠商是否抵用、外牆進氣施工與機器本體價都待報，不再沿用 Panasonic 暖風機每台 6,600 元錯誤參考價；
+            兩間馬桶三叉管＋沖洗器各 769 元、硬體追加共 1,538 元，安裝待核。
+            兩間衛浴電熱毛巾架各一支、客浴浴缸防滑扶手一支的本體、
+            必要配線與固定安裝費均待補，不將原「一般毛巾架等配件」當成已含電熱款。
+            現暫列全屋 9 盞吸頂燈安裝各 1,200 元、共追加 10,800 元，本體依選款另計；
+            陽台須選防潮戶外款及確認屋頂與防水配線。
+            其餘 5 套分離式冷氣室外機僅與室內機連動標位，不另加本體價；
+            機身俯視占地先按各 80×35cm 可編輯暫估、非實機尺寸；
+            臥室1等有兩處直線外窗的空間可拖曳或選擇候選窗位；
+            W50 等狹窄窗洞仍須確認搬運、外牆固定與配管，不代表可施工；
+            臥室2暫不裝分離式，窗外固定及臥室3鐵窗承重均待現勘。
+            走廊軌道與三盞軌道燈的原選款商品加安裝暫增 2,446 元；
+            換款按所選參考價重算，規格與相容性須確認。
+            燈具若只知瓦數，模擬開燈僅作相對光圈示意；具可核對的每盞流明、
+            光束角與光學來源，且已填房間天花淨高時，才按地板或約 80cm 桌面
+            做近似直射照度試算，不能代替照明設計。
+            規劃後總額＝原報價＋已知台幣追加－已報項目減項；
+            外幣未換算，新風機本體、冷氣及其他未填價設備和追加監工、稅金未計。</p>
+
+        <nav class="tabs" role="tablist" aria-label="設備檢視方式">
+            <button type="button" data-view="plan" role="tab" aria-selected="true">格局圖</button>
+            <button type="button" data-view="survey" role="tab" aria-selected="false">門窗尺寸示意</button>
+            <button type="button" data-view="room" role="tab" aria-selected="false">依房間</button>
+            <button type="button" data-view="database" role="tab" aria-selected="false">物件資料庫</button>
+            <button type="button" data-view="device" role="tab" aria-selected="false">已放置物件清單</button>
+        </nav>
+        <div class="toolbar">
+            <button type="button" id="add-item" class="primary">＋ 新增設備</button>
+            <button type="button" id="undo-last" aria-keyshortcuts="Control+Z"
+                disabled>↶ 還原上一步</button>
+            <button type="button" id="save-now">立即儲存</button>
+            <button type="button" id="save-file" disabled>存檔 JSON</button>
+            <button type="button" id="load-file">讀檔 JSON</button>
+            <input type="file" id="load-file-input" accept=".json,application/json" hidden
+                aria-label="選擇裝修設備規劃 JSON 存檔">
+            <button type="button" id="export-items" disabled>輸出物件清單 CSV</button>
+            <a id="download-portable" href="/portable.html"
+                download="裝修設備規劃-離線版.html">下載離線 HTML</a>
+            <button type="button" id="reload" hidden>重新載入</button>
+        </div>
+        <p id="portable-note" class="muted" hidden>這是可離線開啟的 HTML。
+            請按「讀檔 JSON」還原規劃，修改後按「存檔 JSON」下載最新版本；
+            JSON 會包含最近一次操作的復原點，重新整理後仍可按「還原上一步」；
+            瀏覽器的本機暫存不能取代你的存檔。</p>
+        <section id="content" aria-label="設備清單"><p class="muted">正在讀取設備資料…</p></section>
+    </main>
+    <script type="module" src="/app.js"></script>
+</body>
+</html>
