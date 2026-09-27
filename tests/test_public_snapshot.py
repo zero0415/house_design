@@ -12,6 +12,8 @@ PAGES_ENTRY = ROOT / "index.html"
 ADDRESS = re.compile(r"[\u4e00-\u9fff]{2,10}(?:路|街)\d+(?:之\d+)?號(?:\d+樓)?")
 EMAIL = re.compile(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}")
 PHONE = re.compile(r"(?<!\d)09\d{8}(?!\d)|(?<!\d)0[2-8][- ]?\d{7,8}(?!\d)")
+PUBLIC_PRODUCT_SKU = "02603" + "6388"
+SKU_CONTEXTS = ("trplus.com.tw/p/", "catalog-ceiling-trplus-")
 
 
 class PublicSnapshotTests(unittest.TestCase):
@@ -32,12 +34,13 @@ class PublicSnapshotTests(unittest.TestCase):
     def test_public_docs_match_derived_sample(self):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         quote = QUOTE.read_text(encoding="utf-8")
-        for value in ("51", "9", "7", "27,000", "51,500", "2,115,134",
-                      "16,000", "10 筆", "NT$0"):
+        for value in ("51", "9", "7", "27,000", "51,500", "2,107,948",
+                      "16,000", "10 筆", "NT$0", "7,186", "14,994", "3,960",
+                      "26,936", "NT$6,600", "NT$13,200", "1,215"):
             with self.subTest(value=value):
                 self.assertIn(value, readme)
                 self.assertIn(value, quote)
-        self.assertIn("179 個物件與 17 款商品", readme)
+        self.assertIn("179 個物件與 18 款商品", readme)
         self.assertIn("沒有發布原始工程／電源配置 PDF", readme)
         self.assertIn("廚房附件", readme)
         self.assertIn("不自動移入屋內", readme)
@@ -46,6 +49,13 @@ class PublicSnapshotTests(unittest.TestCase):
         self.assertIn("安裝費來源", quote)
         self.assertIn("返回全屋格局", readme)
         self.assertIn("切換房間", quote)
+        for value in ("www.trplus.com.tw/p/016095417",
+                      "www.trplus.com.tw/p/026036388", "www.ovotoilet.com",
+                      "三叉管是否內含未獲確認", "¥79,200", "¥8,600",
+                      "不換算台幣", "不虛構 lux"):
+            with self.subTest(value=value):
+                self.assertIn(value, readme)
+        self.assertIn("九盞既有吸頂燈**仍全數待選", quote)
 
     def test_sample_is_deidentified_without_losing_the_plan(self):
         state = json.loads(SAMPLE.read_text(encoding="utf-8"))
@@ -55,10 +65,10 @@ class PublicSnapshotTests(unittest.TestCase):
         self.assertEqual((state["version"], state["revision"], state["undo"]), (5, 0, None))
         self.assertEqual(state["updatedAt"], "2026-01-01T00:00:00.000Z")
         self.assertEqual((len(state["rooms"]), len(state["items"]), len(state["products"])),
-                         (13, 179, 17))
+                         (13, 179, 18))
         rooms = {room["id"] for room in state["rooms"]}
         products = {product["id"] for product in state["products"]}
-        self.assertEqual(len(products), 17)
+        self.assertEqual(len(products), 18)
         self.assertEqual(len({item["id"] for item in state["items"]}), 179)
         self.assertEqual({room["name"] for room in state["rooms"] if room["id"].startswith(
             "bedroom-")}, {"臥室1", "臥室2", "臥室3"})
@@ -69,6 +79,7 @@ class PublicSnapshotTests(unittest.TestCase):
                         <= products)
         self.assertTrue({f"product-kitchen-plan-{key}" for key in
                          ("sink", "faucet", "hood", "hot-water")} <= products)
+        self.assertIn("catalog-ceiling-trplus-026036388", products)
         self.assertEqual(next(item for item in state["items"] if item["id"] ==
                               "sample-balcony-outlet-01")["outletPlanPointId"], "R48")
         self.assertFalse(any(re.fullmatch(
@@ -92,10 +103,13 @@ class PublicSnapshotTests(unittest.TestCase):
                             for fixture in fixture_ids))
         self.assertEqual((by_id["bath-main-toilet"]["unitPrice"],
                           by_id["bath-guest-toilet"]["unitPrice"],
-                          by_id["bath-guest-tub"]["unitPrice"]), (19035, 19035, 30000))
+                          by_id["bath-guest-tub"]["unitPrice"],
+                          by_id["bath-main-urinal-u0211-a624"]["unitPrice"]),
+                         (14994, 14994, 26936, 3960))
         self.assertTrue(all(by_id[fixture]["unitPrice"] is None
                             for fixture in fixture_ids -
-                            {"bath-main-toilet", "bath-guest-toilet", "bath-guest-tub"}))
+                            {"bath-main-toilet", "bath-guest-toilet", "bath-guest-tub",
+                             "bath-main-urinal-u0211-a624"}))
         for room in ("bath-main", "bath-guest"):
             with self.subTest(room=room):
                 self.assertEqual(sum(by_id[fixture]["roomId"] == room
@@ -105,9 +119,98 @@ class PublicSnapshotTests(unittest.TestCase):
                     self.assertIsNone(by_id[f"{room}-{excluded}"]["installationUnitPrice"])
         self.assertIsNone(by_id["bath-guest-tub-grab-bar"]["installationUnitPrice"])
         self.assertEqual(by_id["quoted-downlight-06"]["installationUnitPrice"], 750)
-        self.assertIn("原報兩套衛浴安裝已含", by_id["bath-main-toilet"]["note"])
+        self.assertIn("原報兩套衛浴一般安裝已含",
+                      by_id["bath-main-toilet"]["note"])
         self.assertIn("超出原安裝額度的補差", by_id["bath-main-urinal-u0211-a624"]["note"])
         self.assertIn("排水改管", by_id["bath-guest-tub"]["note"])
+
+    def test_dealer_catalog_links_and_currency_cautions(self):
+        state = json.loads(SAMPLE.read_text(encoding="utf-8"))
+        items = {item["id"]: item for item in state["items"]}
+        products = {product["id"]: product for product in state["products"]}
+        cases = (
+            ("sample-product-01", ("bath-main-toilet", "bath-guest-toilet"),
+             "TOTO CW288SGUR", 14994, "TWD", "NT$23,800 × 0.63＝NT$14,994"),
+            ("sample-product-02", ("bath-main-urinal-u0211-a624",),
+             "凱薩 U0211-A624", 3960, "TWD", "NT$13,200 × 0.3＝NT$3,960"),
+            ("sample-product-03", ("bath-guest-tub",),
+             "OVO BK106A", 26936, "TWD", "NT$51,800 × 0.52＝NT$26,936"),
+            ("sample-product-04", ("bath-main-bidet-tcf8cm76",
+                                   "bath-guest-bidet-tcf8cm76"),
+             "TOTO TCF8CM76", 79200, "JPY", "¥79,200"),
+            ("sample-product-05", ("bath-main-flush-tca320",
+                                   "bath-guest-flush-tca320"),
+             "TOTO TCA320", 8600, "JPY", "¥8,600"),
+            ("sample-product-09", ("bath-main-rinse-kit",
+                                   "bath-guest-rinse-kit"),
+             "特力屋三叉管與沖洗器組（商品型號待核）", 769, "TWD", "NT$769"),
+        )
+        self.assertEqual(23800 * .63, 14994)
+        self.assertEqual(13200 * .3, 3960)
+        self.assertEqual(51800 * .52, 26936)
+        self.assertEqual(2 * (14994 - 19035) + 3960 + (26936 - 30000), -7186)
+        for product_id, item_ids, model, price, currency, formula in cases:
+            with self.subTest(product_id=product_id):
+                product = products[product_id]
+                self.assertEqual((product["brandModel"], product["unitPrice"],
+                                  product["priceCurrency"]), (model, price, currency))
+                self.assertEqual({item["id"] for item in state["items"]
+                                  if item["productId"] == product_id}, set(item_ids))
+                for field in ("note", "priceSource"):
+                    self.assertIn(formula, product[field])
+                for item_id in item_ids:
+                    item = items[item_id]
+                    self.assertEqual((item["brandModel"], item["unitPrice"],
+                                      item["priceCurrency"], item["productId"]),
+                                     (model, price, currency, product_id))
+                    for field in ("note", "priceSource"):
+                        self.assertIn(formula, item[field])
+        for field in ("note", "priceSource"):
+            self.assertIn("建議售價 NT$6,600", products["sample-product-02"][field])
+            self.assertIn("折扣基準 NT$13,200", products["sample-product-02"][field])
+            self.assertIn("三叉管是否內含未獲確認",
+                          products["sample-product-09"][field])
+            self.assertIn("業務可能無法取得海外庫存",
+                          products["sample-product-04"][field])
+            self.assertIn("業務可能無法取得海外庫存",
+                          products["sample-product-05"][field])
+        self.assertIn("ovotoilet.com/zh-TW/Products/Product",
+                      products["sample-product-03"]["priceSource"])
+        self.assertIn("trplus.com.tw/p/016095417",
+                      products["sample-product-09"]["priceSource"])
+        for item_id in ("bath-main-rinse-kit", "bath-guest-rinse-kit"):
+            self.assertIsNone(items[item_id]["installationUnitPrice"])
+        for item_id in ("bath-main-bidet-tcf8cm76", "bath-guest-bidet-tcf8cm76",
+                        "bath-main-flush-tca320", "bath-guest-flush-tca320"):
+            self.assertEqual(items[item_id]["priceCurrency"], "JPY")
+            self.assertIn("不換算台幣", items[item_id]["note"])
+            self.assertIn("業務可能無法取得海外庫存", items[item_id]["note"])
+
+    def test_ceiling_catalog_is_only_an_unselected_watt_reference(self):
+        state = json.loads(SAMPLE.read_text(encoding="utf-8"))
+        catalog = next(product for product in state["products"] if product["id"] ==
+                       "catalog-ceiling-trplus-026036388")
+        self.assertEqual((catalog["type"], catalog["environment"], catalog["unit"],
+                          catalog["priceCurrency"]), ("ceiling", "indoor", "盞", "TWD"))
+        self.assertEqual((catalog["unitPrice"], catalog["installationUnitPrice"],
+                          catalog["lightWatts"], catalog["lightLumens"],
+                          catalog["beamAngleDeg"], catalog["lightSpecSource"]),
+                         (1215, 1200, 50, None, None, ""))
+        self.assertIn("trplus.com.tw/p/026036388", catalog["priceSource"])
+        self.assertIn("非商家安裝報價", catalog["priceSource"])
+        for term in ("3–5 坪", "直徑 50cm", "8cm", "金屬", "壓克力",
+                     "陽台防潮等級未核", "50W", "流明", "光束角", "IES",
+                     "不得虛構 lux"):
+            self.assertIn(term, catalog["note"])
+        self.assertFalse(any(item["productId"] == catalog["id"] for item in
+                             state["items"]))
+        ceilings = [item for item in state["items"] if item["lightType"] == "ceiling"]
+        self.assertEqual(len(ceilings), 9)
+        self.assertTrue(all(item["unitPrice"] is None and item["productId"] is None and
+                            item["installationUnitPrice"] == 1200 and
+                            item["lightSelection"] == ("outdoor-pending" if item["roomId"]
+                                                       == "balcony" else "pending")
+                            for item in ceilings))
 
     def test_derived_electrical_endpoints_and_safety_warnings(self):
         items = json.loads(SAMPLE.read_text(encoding="utf-8"))["items"]
@@ -226,7 +329,11 @@ class PublicSnapshotTests(unittest.TestCase):
                 text = content.decode("utf-8")
                 self.assertNotRegex(text, ADDRESS)
                 self.assertNotRegex(text, EMAIL)
-                self.assertNotRegex(text, PHONE)
+                phones = [match.group() for match in PHONE.finditer(text)
+                          if not (match.group() == PUBLIC_PRODUCT_SKU and
+                                  any(text[:match.start()].endswith(prefix)
+                                      for prefix in SKU_CONTEXTS))]
+                self.assertEqual(phones, [])
 
 
 if __name__ == "__main__":

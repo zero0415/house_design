@@ -37,11 +37,11 @@ def legacy_bathroom_save():
     state = json.loads(SAMPLE.read_text(encoding="utf-8"))
     previous_notes = {
         "bath-main-toilet": (
-            "PChome商品售價不含安裝；原報兩套衛浴安裝已含，本件另加 NT$0；價格可能變動。",
+            "原報兩套衛浴一般安裝已含，另加 NT$0；改管另待核。",
             "PChome商品標示不含安裝；價格可能變動。",
         ),
         "bath-guest-toilet": (
-            "PChome商品售價不含安裝；原報兩套衛浴安裝已含，本件另加 NT$0；價格可能變動。",
+            "原報兩套衛浴一般安裝已含，另加 NT$0；改管另待核。",
             "PChome商品標示不含安裝；價格可能變動。",
         ),
         "bath-main-urinal-u0211-a624": (
@@ -127,7 +127,7 @@ class PagesPreviewTests(unittest.TestCase):
             page.on("pageerror", lambda error: errors.append(str(error)))
             self.open_demo(page)
             self.assertEqual(page.locator(".overview-svg .plan-zone").count(), 13)
-            self.assertEqual(page.locator("#overall-total").inner_text(), "NT$2,115,134")
+            self.assertEqual(page.locator("#overall-total").inner_text(), "NT$2,107,948")
             self.assertEqual(page.locator(".overview-svg [data-outlet-point-id]").count(), 67)
             for prefix, count in (("R", 51), ("B", 9), ("C", 7)):
                 self.assertEqual(page.locator(
@@ -161,7 +161,7 @@ class PagesPreviewTests(unittest.TestCase):
             )
             state = page.evaluate("globalThis.__RENOVATION_OFFLINE_STORE__.read()")
             self.assertEqual(state["rooms"][3]["ceilingHeightCm"], 270)
-            self.assertEqual((len(state["items"]), len(state["products"])), (179, 17))
+            self.assertEqual((len(state["items"]), len(state["products"])), (179, 18))
             self.assertEqual(len([url for url in requests if "/files/" in url]), 1)
             self.assertEqual(errors, [])
         finally:
@@ -259,7 +259,7 @@ class PagesPreviewTests(unittest.TestCase):
                 };
             }""")
             self.assertEqual(report["quote"], 1_959_530)
-            self.assertEqual(report["plan"], 2_115_134)
+            self.assertEqual(report["plan"], 2_107_948)
             self.assertEqual(report["kitchenAdditions"], 51_500)
             self.assertEqual((report["weakAdditions"], report["weakQuoted"]), (0, 21_000))
             self.assertEqual(report["counts"], {
@@ -272,6 +272,106 @@ class PagesPreviewTests(unittest.TestCase):
                                   "unchangedOutlets", "partialRejected", "weakRejected",
                                   "csvAnchors", "oldSampleIgnored"):
                 self.assertTrue(report[property_name], property_name)
+        finally:
+            context.close()
+
+    def test_catalog_only_50w_light_stays_relative_until_selected(self):
+        context = self.browser.new_context()
+        try:
+            page = context.new_page()
+            requests = []
+            errors = []
+            page.on("request", lambda request: requests.append(request.url)
+                    if request.url.startswith(("http:", "https:")) else None)
+            page.on("pageerror", lambda error: errors.append(str(error)))
+            self.open_demo(page)
+            page.locator('button[data-view="database"]').click()
+            card = page.locator(
+                '.product-card[data-product-id="catalog-ceiling-trplus-026036388"]'
+            )
+            self.assertTrue(card.is_visible())
+            for label in ("50W", "流明待查", "光束角待查", "光學來源待查",
+                          "NT$1,215", "已連動 0 個"):
+                self.assertIn(label, card.inner_text())
+            report = page.evaluate("""async () => {
+                const root = new URL('../extensions/renovation-equipment/assets/',
+                    location.href);
+                const [{applyProductToItem,productAllowedInRoom,linkedProductMismatch},
+                    {calculateBudget,calculatePlanTotal,ORIGINAL_QUOTE_TWD},
+                    {lightDataStatus,lightSourcesForRoom,estimateRoomIlluminance},
+                    {roomGeometry},{encodeSave,decodeSave}] =
+                    await Promise.all(['product-database.js','budget.js',
+                        'lighting-preview.js','floorplan.js','file-actions.js']
+                        .map(name => import(new URL(name,root))));
+                const original = await globalThis.__RENOVATION_OFFLINE_STORE__.read();
+                const product = original.products.find(entry =>
+                    entry.id === 'catalog-ceiling-trplus-026036388');
+                const ceilings = original.items.filter(item =>
+                    item.lightType === 'ceiling');
+                const before = calculatePlanTotal(calculateBudget(original.items,
+                    {wholePlan:true})).TWD;
+                const light = original.items.find(item =>
+                    item.id === 'living-ceiling-light-01');
+                const selected = applyProductToItem(product,light);
+                const room = roomGeometry(original.rooms.find(entry =>
+                    entry.id === light.roomId));
+                const lampStatus = lightDataStatus(selected,room);
+                const source = lightSourcesForRoom(room,[selected],
+                    new Set([selected.id]))[0];
+                const illuminance = estimateRoomIlluminance(room,[selected],
+                    new Set([selected.id]));
+                const changed = structuredClone(original);
+                changed.items = changed.items.map(item => item.id === light.id ?
+                    selected : item);
+                const saved = await globalThis.__RENOVATION_OFFLINE_STORE__.update({
+                    ...changed,expectedRevision:original.revision,undo:null});
+                const after = calculatePlanTotal(calculateBudget(saved.items,
+                    {wholePlan:true})).TWD;
+                const exported = decodeSave(encodeSave(saved));
+                return {
+                    quote:ORIGINAL_QUOTE_TWD,before,after,
+                    products:original.products.length,
+                    originalCeilings:ceilings.length,
+                    pending:ceilings.every(item => item.productId === null &&
+                        item.unitPrice === null &&
+                        item.lightSelection === (item.roomId === 'balcony' ?
+                            'outdoor-pending' : 'pending')),
+                    catalogOnly:original.items.every(item =>
+                        item.productId !== product.id),
+                    indoor:productAllowedInRoom(product,'living-dining'),
+                    balcony:productAllowedInRoom(product,'balcony'),
+                    fixturePrice:selected.unitPrice,install:selected.installationUnitPrice,
+                    watts:selected.lightWatts,lumens:selected.lightLumens,
+                    angle:selected.beamAngleDeg,specSource:selected.lightSpecSource,
+                    mismatch:linkedProductMismatch(product,selected),
+                    mode:lampStatus.mode,missing:lampStatus.missing,
+                    centerLux:source.centerLux ?? null,
+                    completeCount:illuminance.completeCount,
+                    minLux:illuminance.minLux,
+                    roundTrip:exported.items.find(item =>
+                        item.id === selected.id).unitPrice === 1215 &&
+                        exported.products.length === 18,
+                };
+            }""")
+            self.assertEqual((report["quote"], report["before"], report["after"]),
+                             (1_959_530, 2_107_948, 2_109_163))
+            self.assertEqual((report["products"], report["originalCeilings"]),
+                             (18, 9))
+            self.assertTrue(report["pending"] and report["catalogOnly"])
+            self.assertTrue(report["indoor"])
+            self.assertFalse(report["balcony"])
+            self.assertEqual((report["fixturePrice"], report["install"],
+                              report["watts"], report["lumens"],
+                              report["angle"], report["specSource"], report["mismatch"]),
+                             (1215, 1200, 50, None, None, "", None))
+            self.assertEqual(report["mode"], "watt-relative")
+            for missing in ("流明", "光束角", "光學資料來源"):
+                self.assertIn(missing, report["missing"])
+            self.assertEqual((report["centerLux"], report["completeCount"],
+                              report["minLux"]), (None, 0, None))
+            self.assertTrue(report["roundTrip"])
+            self.assertEqual(errors, [])
+            self.assertTrue(all(url.startswith(self.base) for url in requests))
         finally:
             context.close()
 
@@ -311,7 +411,7 @@ class PagesPreviewTests(unittest.TestCase):
 
             page.locator('button[data-view="room"]').click()
             toilet = page.locator('details.equipment[data-id="bath-main-toilet"]')
-            self.assertIn("商品 NT$19,035", toilet.locator("summary").inner_text())
+            self.assertIn("商品 NT$14,994", toilet.locator("summary").inner_text())
             self.assertIn("安裝 NT$0（原報已含）",
                           toilet.locator("summary").inner_text())
             toilet.locator("summary").click()
@@ -323,6 +423,13 @@ class PagesPreviewTests(unittest.TestCase):
             vanity = page.locator('details.equipment[data-id="bath-main-vanity"]')
             self.assertIn("商品本體待補 · 安裝 NT$0",
                           vanity.locator("summary").inner_text())
+            for fixture_id, price in (("bath-main-urinal-u0211-a624", "3,960"),
+                                      ("bath-guest-tub", "26,936")):
+                summary = page.locator(
+                    f'details.equipment[data-id="{fixture_id}"] summary'
+                ).inner_text()
+                self.assertIn(f"商品 NT${price}", summary)
+                self.assertIn("安裝 NT$0（原報已含）", summary)
             special = page.locator('details.equipment[data-id="bath-main-heater"]')
             self.assertEqual(special.locator(
                 'input[data-field="installationUnitPrice"]').count(), 0)
@@ -409,7 +516,7 @@ class PagesPreviewTests(unittest.TestCase):
             self.assertTrue(all(item["install"] == 0 for item in report["covered"]))
             self.assertFalse(report["mismatch"])
             self.assertGreaterEqual(report["linkedToilets"], 1)
-            self.assertEqual(report["before"], 2_115_134)
+            self.assertEqual(report["before"], 2_107_948)
             self.assertEqual(report["after"] - report["before"],
                              100 * report["linkedToilets"])
             self.assertEqual(report["repricedToilet"]["installationUnitPrice"], 0)
@@ -434,7 +541,7 @@ class PagesPreviewTests(unittest.TestCase):
             )
             page.locator("#load-file-input").set_input_files(str(SAMPLE))
             page.wait_for_function(
-                "document.querySelector('#overall-total').textContent.includes('2,115,134')",
+                "document.querySelector('#overall-total').textContent.includes('2,107,948')",
                 timeout=15000,
             )
             with page.expect_download() as downloaded:
@@ -451,8 +558,12 @@ class PagesPreviewTests(unittest.TestCase):
                                 for row in included))
             self.assertEqual(sorted(row["商品單價"] for row in included
                                     if row["商品單價"] != "待補"),
-                             ["19035", "19035", "30000"])
+                             ["14994", "14994", "26936", "3960"])
             self.assertTrue(any(row["商品單價"] == "待補" for row in included))
+            self.assertIn("trplus.com.tw/p/016095417",
+                          "\n".join(row["價格來源"] for row in rows))
+            self.assertIn("三叉管是否內含未獲確認",
+                          "\n".join(row["備註"] for row in rows))
             for row in rows:
                 if "電熱毛巾架" in row["名稱"] or "防滑扶手" in row["名稱"]:
                     self.assertEqual(row["安裝費來源"], "")
@@ -463,7 +574,14 @@ class PagesPreviewTests(unittest.TestCase):
                 Path(downloaded.value.path()).read_text(encoding="utf-8")
             )["state"]
             self.assertEqual((len(state["items"]), len(state["products"]),
-                              state["undo"]), (179, 17, None))
+                              state["undo"]), (179, 18, None))
+            lamp = next(product for product in state["products"] if product["id"] ==
+                        "catalog-ceiling-trplus-026036388")
+            self.assertEqual((lamp["unitPrice"], lamp["lightWatts"],
+                              lamp["lightLumens"], lamp["beamAngleDeg"]),
+                             (1215, 50, None, None))
+            self.assertFalse(any(item["productId"] == lamp["id"] for item in
+                                 state["items"]))
             self.assertEqual({item["id"] for item in state["items"]
                               if item["installationUnitPrice"] == 0},
                              INCLUDED_BATHROOM_IDS)
@@ -492,18 +610,37 @@ class PagesPreviewTests(unittest.TestCase):
                 "buffer": json.dumps(old, ensure_ascii=False).encode("utf-8"),
             })
             page.wait_for_function(
-                "document.querySelector('#overall-total').textContent.includes('2,115,134')",
+                "document.querySelector('#overall-total').textContent.includes('2,107,948')",
                 timeout=15000,
             )
             normalized = page.evaluate(
                 "globalThis.__RENOVATION_OFFLINE_STORE__.read()"
             )
             original_items = {item["id"]: item for item in old["items"]}
-            expected_items = {item["id"]: item for item in
-                              json.loads(SAMPLE.read_text(encoding="utf-8"))["items"]}
-            self.assertEqual(normalized["items"], list(expected_items.values()))
-            self.assertEqual(normalized["undo"]["items"],
-                             list(expected_items.values()))
+            expected_items = deepcopy(old["items"])
+            for item in expected_items:
+                if item["id"] in INCLUDED_BATHROOM_IDS:
+                    item["installationUnitPrice"] = 0
+                if item["id"] in {"bath-main-toilet", "bath-guest-toilet"}:
+                    item["note"] = item["note"].replace(
+                        "PChome商品標示不含安裝；價格可能變動。",
+                        "PChome商品售價不含安裝；原報兩套衛浴安裝已含，"
+                        "本件另加 NT$0；價格可能變動。",
+                    )
+                elif item["id"] == "bath-main-urinal-u0211-a624":
+                    item["note"] = item["note"].replace(
+                        "固定方式與安裝費待確認。",
+                        "固定方式與超出原安裝額度的補差待確認；"
+                        "本件安裝另加 NT$0（原報已含）。",
+                    )
+                elif item["id"] == "bath-guest-tub":
+                    item["note"] = item["note"].replace(
+                        "排水與安裝費均待確認。",
+                        "排水改管與超出原安裝額度的補差待核；"
+                        "本件安裝另加 NT$0（原報已含）。",
+                    )
+            self.assertEqual(normalized["items"], expected_items)
+            self.assertEqual(normalized["undo"]["items"], expected_items)
             self.assertEqual(normalized["products"], old["products"])
             self.assertEqual(len(normalized["items"]), 179)
             self.assertEqual({item["id"] for item in normalized["items"]
@@ -543,7 +680,7 @@ class PagesPreviewTests(unittest.TestCase):
                               if item["installationUnitPrice"] == 0},
                              INCLUDED_BATHROOM_IDS)
             self.assertEqual(page.locator("#overall-total").inner_text(),
-                             "NT$2,115,134")
+                             "NT$2,107,948")
             stored = json.loads(page.evaluate(
                 "localStorage.getItem('renovation-equipment-offline-v1:' + location.pathname)"
             ))
@@ -565,7 +702,7 @@ class PagesPreviewTests(unittest.TestCase):
             )
             page.locator("#load-file-input").set_input_files(str(SAMPLE))
             page.wait_for_function(
-                "document.querySelector('#overall-total').textContent.includes('2,115,134')",
+                "document.querySelector('#overall-total').textContent.includes('2,107,948')",
                 timeout=15000,
             )
             with page.expect_download() as download:
@@ -582,7 +719,7 @@ class PagesPreviewTests(unittest.TestCase):
             saved = json.loads(Path(download.value.path()).read_text(encoding="utf-8"))
             self.assertEqual((saved["formatVersion"], len(saved["state"]["items"]),
                               len(saved["state"]["products"]), saved["state"]["undo"]),
-                             (5, 179, 17, None))
+                             (5, 179, 18, None))
             page.locator('.overview-svg .plan-zone[data-select-room="kitchen"]').click()
             self.assertEqual(page.locator(
                 '.room-svg [data-marker-id^="kitchen-plan-"]').count(), 12)
@@ -604,7 +741,7 @@ class PagesPreviewTests(unittest.TestCase):
                 return state.rooms.find(room => room.id === 'kitchen').ceilingHeightCm ===
                     null && state.items.length === 179;
             }""", timeout=15000)
-            self.assertEqual(page.locator("#overall-total").inner_text(), "NT$2,115,134")
+            self.assertEqual(page.locator("#overall-total").inner_text(), "NT$2,107,948")
         finally:
             context.close()
 
@@ -633,7 +770,7 @@ class PagesPreviewTests(unittest.TestCase):
             gas = next(item for item in rotated["items"] if item["id"] ==
                        "kitchen-plan-gas")
             self.assertIsNone(gas["unitPrice"])
-            self.assertEqual(page.locator("#overall-total").inner_text(), "NT$2,115,134")
+            self.assertEqual(page.locator("#overall-total").inner_text(), "NT$2,107,948")
             page.locator("#undo-last").click()
             page.wait_for_function("""async () => {
                 const state = await globalThis.__RENOVATION_OFFLINE_STORE__.read();
@@ -686,7 +823,7 @@ class PagesPreviewTests(unittest.TestCase):
                 return Math.abs(restored.x-original.x) +
                     Math.abs(restored.y-original.y) < .000001;
             }""", arg=original, timeout=15000)
-            self.assertEqual(page.locator("#overall-total").inner_text(), "NT$2,115,134")
+            self.assertEqual(page.locator("#overall-total").inner_text(), "NT$2,107,948")
         finally:
             context.close()
 
