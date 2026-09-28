@@ -47,6 +47,10 @@ import {
 } from "./budget.js";
 import { materialIncludesTrack, SLIDE_TRACK_RATE_TWD } from "./slide-tracks.js";
 import {
+    DOOR_TRACK_CAUTION, isAllocatedDoorItem, isQuotedDoor,
+    isUnquotedBalconyDoor,
+} from "./door-allocation.js";
+import {
     BEDROOM2_PARTITION_ID, BEDROOM2_PARTITION_OPTIONS, BEDROOM2_PARTITION_QUOTED_AREA,
 } from "./partition-options.js";
 import {
@@ -298,6 +302,7 @@ function quotedTrackForDoor(doorId) {
 }
 
 function itemAmountLabel(item) {
+    if (isUnquotedBalconyDoor(item) && item.unitPrice === null) return "未計算";
     if (isSplitAirConditioner(item) && item.acPlanStatus === "excluded") {
         return "暫不裝分離式";
     }
@@ -772,13 +777,21 @@ function renderQuotedTrackControls(track) {
             <span data-total-id="${escapeHtml(track.id)}">${itemAmountLabel(track)}</span>
         </div>
         <small>每米 NT$${currency.format(SLIDE_TRACK_RATE_TWD)}；
-            ${slideTrackNeeded(track.trackDoorId, state.items)
+            ${isAllocatedDoorItem(track)
+                ? "保留原報額度；超出0.8米的價差才暫估追加，縮短或門型改變不自動退費。"
+                : slideTrackNeeded(track.trackDoorId, state.items)
                 ? "超過原報價 0.8 米的價差才算追加，實際長度待量。"
                 : "目前門型不另用軌道，原報價減項仍須廠商確認。"}</small>
+        ${isAllocatedDoorItem(track)
+            ? `<p class="plan-overlap-alert" role="note">${DOOR_TRACK_CAUTION}</p>`
+            : ""}
     </div>`;
 }
 
 function renderDoorTrackControls(door) {
+    if (isUnquotedBalconyDoor(door)) {
+        return '<p class="plan-disclaimer">陽台門體與軌道未計算、非免費；未報價，不自動套用每米單價，淨空與施工須核。</p>';
+    }
     const quote = quotedTrackForDoor(door.doorId);
     if (quote) return renderQuotedTrackControls(quote);
     if (door.doorOpeningKind !== "slide") return "";
@@ -840,7 +853,7 @@ function renderItem(item, { displayName = null, circuitNumber = null } = {}) {
     const amountLabel = itemAmountLabel(item);
     const showerDoor = isShowerDoor(item);
     const quotedEquipment = isQuotedEquipment(item);
-    const quoted = item.kind === "door" || quotedEquipment;
+    const quoted = isQuotedDoor(item) || quotedEquipment;
     const quoteSource = quoteProvenance(item);
     const installationSource = installationQuoteProvenance(item);
     const partition = item.id === BEDROOM2_PARTITION_ID;
@@ -911,10 +924,12 @@ function renderItem(item, { displayName = null, circuitNumber = null } = {}) {
                 ? outdoorACZone(item).label : "位置待現勘"} ·
                 長 ${item.outdoorWidthCm}×短 ${item.outdoorDepthCm}cm 暫估，
                 轉向 ${item.outdoorOrientation ?? 0}°，不另重算本體` : null,
-        isSlideTrack(item) && !slideTrackNeeded(item.trackDoorId, state.items)
+        isSlideTrack(item) && !isAllocatedDoorItem(item) &&
+            !slideTrackNeeded(item.trackDoorId, state.items)
             ? "目前未使用軌道，減項待廠商確認" : null,
         item.kind === "door" && item.doorOpeningKind === "slide"
-            ? materialIncludesTrack(item.doorMaterial) ? "門片單價已含軌道" :
+            ? isUnquotedBalconyDoor(item) ? "門體／軌道未計算，非免費" :
+                materialIncludesTrack(item.doorMaterial) ? "門片單價已含軌道" :
                 quotedTrackForDoor(item.doorId) ? "軌道已列原報價" :
                     "軌道另按 NT$1,800／米試算" : null,
         item.placement ? "圖上已標位置" : null,
@@ -945,8 +960,11 @@ function renderItem(item, { displayName = null, circuitNumber = null } = {}) {
                     data-action="request-remove-item" data-item-id="${id}">刪除</button>` : ""}
                 ${quotedOutlet ? `<button type="button" class="quick-delete quoted-outlet-move"
                     data-action="request-move-outlet" data-item-id="${id}">移至別房</button>` : ""}` :
-                `<button type="button" class="quick-delete" data-action="request-remove-item"
-                    data-item-id="${id}" aria-label="刪除${escapeHtml(item.name)}">刪除</button>`}
+                item.kind === "door" ? "" :
+                    `<button type="button" class="quick-delete"
+                        data-action="request-remove-item"
+                        data-item-id="${id}"
+                        aria-label="刪除${escapeHtml(item.name)}">刪除</button>`}
         </summary>
         <div class="item-editor">
         ${quoteSource || installationSource ? `<p class="quote-source-details">原報價來源：
@@ -2498,8 +2516,11 @@ function renderPlanView() {
                     ? `<span class="track-light-key"></span>走廊黑線及圓點是一條 ${corridorTrack.trackLengthCm}cm 軌道與
                         ${corridorTrack.spotlightQuantity} 盞軌道燈；點淺灰走廊可編輯，
                         拖動軌道時燈會一起移動。軌道、燈具和安裝均不在原報價總額內。` : ""}
-                主浴通主臥及客廳各一門，客廳側按你標示改畫拉門，報價單價仍需重核；
-                臥室3與工作室新增拉門尚未列入門片報價；衛浴2與臥室3間沒有門。
+                主浴通主臥及客廳各一門，另有乾濕分離玻璃門；
+                門型依目前存檔，開向與施工價差待核。
+                ${state.items.some(isAllocatedDoorItem)
+                    ? "臥室3↔工作室滑門已改歸原工作室19,000元額度；陽台門未計算。"
+                    : "臥室3與工作室新增拉門尚未列入門片報價。"}衛浴2與臥室3間沒有門。
                 玄關門不列本次門片計價。<span class="window-key"></span>淡藍線是現況圖的 W 窗洞，
                 寬度依原圖標註；陽台後側沒有窗，
                 ${visiblePlanLayers.furniture ? "左側青灰方框是現況泥作水槽" :
@@ -2611,7 +2632,12 @@ function renderPlanView() {
                 黃框表示現況窗洞窄於暫估機長；都不表示可施工。</small>
         </section>` : "";
     const roomDoors = items.filter((item) => item.kind === "door");
-    const newSlideInRoom = room.id === "studio" || room.id === "bedroom-3";
+    const studioSlide = state.items.find((item) =>
+        item.kind === "door" && item.doorId === "bedroom-3-studio");
+    if (room.id === "bedroom-3" && studioSlide &&
+        !roomDoors.includes(studioSlide)) roomDoors.push(studioSlide);
+    const newSlideInRoom = !studioSlide &&
+        (room.id === "studio" || room.id === "bedroom-3");
     const newSlideTrack = newSlideInRoom ? quotedTrackForDoor("bedroom-3-studio") : null;
     const doorControls = roomDoors.length || newSlideInRoom ? `<details class="door-choices"
         data-room-id="${escapeHtml(room.id)}" ${openDoorRooms.has(room.id) ? "open" : ""}>
@@ -2623,6 +2649,8 @@ function renderPlanView() {
             <strong>${escapeHtml(item.name)}</strong>
             <small>${isShowerDoor(item)
                 ? "本房玻璃隔屏與防爆膜已各在設備明細列入原報價；這筆門位不重複計價。變更門型、門洞淨寬須請廠商核價。"
+                : isUnquotedBalconyDoor(item)
+                    ? "未計算，非免費；原19,000元工作室額度已歸臥室3↔工作室，此門體與施工待另報。"
                 : `原報價：${item.quotedQuantity} 組 × NT$${currency.format(item.quotedUnitPrice)}；
                     改材質只將價差算進追加／減項；${item.doorOpeningKind !==
                     DOOR_OPTIONS[item.doorMaterial]?.opening

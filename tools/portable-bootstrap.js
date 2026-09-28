@@ -18,8 +18,12 @@ try {
     const { PLANNER_STATE_VERSION } = await import(moduleURLs.get("assets/socket-plan.js"));
     const { guardControlRelationsUpdate } =
         await import(moduleURLs.get("assets/circuit-preview.js"));
+    const { guardDoorAllocationUpdate } =
+        await import(moduleURLs.get("assets/door-allocation.js"));
     const legacyStorageKey = `renovation-equipment-offline-v1:${location.pathname}`;
-    const storageKey = `renovation-equipment-offline-controls-v1:${location.pathname}`;
+    const controlsStorageKey =
+        `renovation-equipment-offline-controls-v1:${location.pathname}`;
+    const storageKey = `renovation-equipment-offline-doors-v1:${location.pathname}`;
     const pagesDemo = (location.protocol === "https:" || location.protocol === "http:") &&
         new URL(location.href).searchParams.get("demo") === "pages";
     if (pagesDemo) {
@@ -35,7 +39,8 @@ try {
     let storedText = null;
     try {
         const ownSaved = localStorage.getItem(storageKey);
-        storedText = ownSaved ?? localStorage.getItem(legacyStorageKey);
+        storedText = ownSaved ?? localStorage.getItem(controlsStorageKey) ??
+            localStorage.getItem(legacyStorageKey);
         if (storedText !== null) current = validateState(JSON.parse(storedText));
         if (ownSaved === null && current) {
             localStorage.setItem(storageKey, JSON.stringify(current));
@@ -77,7 +82,8 @@ try {
                 throw new Error("公開示例存檔含有編輯紀錄，請檢查範例資料。");
             }
             const ownSaved = localStorage.getItem(storageKey);
-            const latestSaved = ownSaved ?? localStorage.getItem(legacyStorageKey);
+            const latestSaved = ownSaved ?? localStorage.getItem(controlsStorageKey) ??
+                localStorage.getItem(legacyStorageKey);
             if (latestSaved !== null) {
                 current = validateState(JSON.parse(latestSaved));
                 if (ownSaved === null) {
@@ -150,6 +156,7 @@ try {
                 throw error;
             }
             guardControlRelationsUpdate(current, candidate);
+            guardDoorAllocationUpdate(current, candidate);
             const next = validateState({
                 version: PLANNER_STATE_VERSION,
                 revision: revision + 1,

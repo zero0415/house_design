@@ -2,6 +2,9 @@ import {
     materialIncludesTrack, QUOTED_SLIDE_TRACKS, SLIDE_TRACK_RATE_TWD,
 } from "./slide-tracks.js";
 import {
+    isAllocatedDoorItem, isQuotedDoor, isUnquotedBalconyDoor,
+} from "./door-allocation.js";
+import {
     DEDICATED_CIRCUIT_UNIT_PRICE_TWD, QUOTED_CIRCUITS, QUOTED_OUTLETS,
     SOCKET_UNIT_PRICE_TWD,
 } from "./socket-plan.js";
@@ -23,8 +26,11 @@ export function slideTrackNeeded(doorId, items) {
 
 export function unquotedTrackCost(door, items) {
     if (door.kind !== "door") throw new TypeError("只能計算門位的滑門軌道費。");
+    if (isUnquotedBalconyDoor(door)) return 0;
     if (door.doorOpeningKind !== "slide" || materialIncludesTrack(door.doorMaterial) ||
-        QUOTED_SLIDE_TRACKS.some((track) => track.doorId === door.doorId)) return 0;
+        items.some((track) => track.trackDoorId === door.doorId) ||
+        !items.some(isAllocatedDoorItem) &&
+            QUOTED_SLIDE_TRACKS.some((track) => track.doorId === door.doorId)) return 0;
     return door.trackLengthM === null || door.trackLengthM === undefined
         ? null : Math.round((door.trackLengthM * SLIDE_TRACK_RATE_TWD + Number.EPSILON) * 100) / 100;
 }
@@ -34,6 +40,12 @@ export function itemSubtotal(item, items) {
     if (item.switchType && item.switchPlanStatus === "removed") return 0;
     if (isSlideTrack(item)) {
         if (!Array.isArray(items)) throw new TypeError("滑門軌道計價需要門位清單。");
+        if (isAllocatedDoorItem(item)) {
+            return item.quantity === null || item.unitPrice === null ? null :
+                Math.max(item.quotedQuantity * item.quotedUnitPrice,
+                    Math.round((item.quantity * item.unitPrice +
+                        Number.EPSILON) * 100) / 100);
+        }
         if (!slideTrackNeeded(item.trackDoorId, items)) return 0;
     }
     return item.quantity === null || item.unitPrice === null
@@ -88,7 +100,7 @@ export function calculateBudget(items, { wholePlan = false } = {}) {
     let quotedEquipmentTotal = 0;
     for (const item of items) {
         const quotedEquipment = isQuotedEquipment(item);
-        const quoted = item.kind === "door" || quotedEquipment;
+        const quoted = isQuotedDoor(item) || quotedEquipment;
         const baseline = quoted ? item.quotedQuantity * item.quotedUnitPrice : 0;
         if (item.kind === "door") quotedDoorTotal += baseline;
         if (quotedEquipment) quotedEquipmentTotal += baseline;

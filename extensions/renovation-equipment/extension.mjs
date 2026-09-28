@@ -30,6 +30,7 @@ const assets = new Map([
     ["/lighting-preview.js", [join(extensionDirectory, "assets", "lighting-preview.js"), "text/javascript; charset=utf-8"]],
     ["/circuit-preview.js", [join(extensionDirectory, "assets", "circuit-preview.js"), "text/javascript; charset=utf-8"]],
     ["/door-options.js", [join(extensionDirectory, "assets", "door-options.js"), "text/javascript; charset=utf-8"]],
+    ["/door-allocation.js", [join(extensionDirectory, "assets", "door-allocation.js"), "text/javascript; charset=utf-8"]],
     ["/slide-tracks.js", [join(extensionDirectory, "assets", "slide-tracks.js"), "text/javascript; charset=utf-8"]],
     ["/partition-options.js", [join(extensionDirectory, "assets", "partition-options.js"), "text/javascript; charset=utf-8"]],
     ["/switch-options.js", [join(extensionDirectory, "assets", "switch-options.js"), "text/javascript; charset=utf-8"]],

@@ -32,7 +32,7 @@ other_switch = "quoted-switch-02"
 track_id = "corridor-track-lighting"
 light_id = "living-ceiling-light-01"
 assert (len(source["items"]), len(source["products"]), source["revision"],
-        source["undo"]) == (180, 28, 0, None)
+        source["undo"]) == (181, 28, 0, None)
 
 server_script = r"""
 import { createServer } from 'node:http';
@@ -203,7 +203,7 @@ with tempfile.TemporaryDirectory(prefix="public-control-relations-") as director
                     page.locator("#save-file").click()
                 download.value.save_as(str(export_path))
                 exported = json.loads(export_path.read_text(encoding="utf-8"))
-                assert exported["formatVersion"] == 6
+                assert exported["formatVersion"] == 7
                 assert snapshot(exported["state"]) == snapshot(second)
                 page.reload()
                 expect(page.locator(".overview-svg")).to_be_visible()
@@ -276,11 +276,14 @@ with tempfile.TemporaryDirectory(prefix="public-control-relations-") as director
             assert snapshot(read(page, "offline")) == snapshot(previous)
             keys = page.evaluate("""() => ({
                 old:'renovation-equipment-offline-v1:' + location.pathname,
-                next:'renovation-equipment-offline-controls-v1:' + location.pathname,
+                controls:'renovation-equipment-offline-controls-v1:' + location.pathname,
+                next:'renovation-equipment-offline-doors-v1:' + location.pathname,
             })""")
             assert page.evaluate(
                 "key => JSON.parse(localStorage.getItem(key))",
                 keys["old"]) == previous
+            assert page.evaluate(
+                "key => localStorage.getItem(key)", keys["controls"]) is None
             copied = page.evaluate(
                 "key => JSON.parse(localStorage.getItem(key))", keys["next"])
             assert snapshot(copied) == snapshot(previous)
@@ -313,6 +316,53 @@ with tempfile.TemporaryDirectory(prefix="public-control-relations-") as director
                 page.reload()
                 expect(page.locator("#save-status")).to_contain_text(
                     "暫存資料無法驗證")
+            context.close()
+
+            context = browser.new_context()
+            old_rollback = deepcopy(normalized_source)
+            old_rollback["revision"] = 710
+            controls_save = deepcopy(normalized_source)
+            controls_save["revision"] = 711
+            next(entry for entry in controls_save["items"] if
+                 entry["id"] == switch_id)["controlledLightIds"] = [track_id]
+            context.add_init_script(script=f"""
+                if (location.protocol === 'file:' &&
+                    !localStorage.getItem('test-priority-seeded')) {{
+                    localStorage.setItem(
+                        'renovation-equipment-offline-v1:' + location.pathname,
+                        JSON.stringify({json.dumps(old_rollback, ensure_ascii=False)}));
+                    localStorage.setItem(
+                        'renovation-equipment-offline-controls-v1:' + location.pathname,
+                        JSON.stringify({json.dumps(controls_save, ensure_ascii=False)}));
+                    localStorage.setItem('test-priority-seeded', '1');
+                }}
+            """)
+            page = context.new_page()
+            page.goto(portable)
+            expect(page.locator(".overview-svg")).to_be_visible()
+            assert snapshot(read(page, "offline")) == snapshot(controls_save)
+            assert read(page, "offline")["revision"] == 711
+            page.get_by_role("tab", name="燈具配置圖", exact=True).click()
+            expect(page.locator("[data-control-light-id]")).to_have_count(1)
+            control_key = page.evaluate(
+                "'renovation-equipment-offline-controls-v1:' + location.pathname")
+            door_key = page.evaluate(
+                "'renovation-equipment-offline-doors-v1:' + location.pathname")
+            assert page.evaluate(
+                "key => JSON.parse(localStorage.getItem(key))",
+                control_key) == controls_save
+            assert snapshot(page.evaluate(
+                "key => JSON.parse(localStorage.getItem(key))",
+                door_key)) == snapshot(controls_save)
+            page.evaluate(
+                "({key,state}) => localStorage.setItem(key,JSON.stringify(state))",
+                {"key": control_key, "state": old_rollback},
+            )
+            page.reload()
+            expect(page.locator(".overview-svg")).to_be_visible()
+            assert snapshot(read(page, "offline")) == snapshot(controls_save), (
+                "Existing doors cache must outrank the older controls cache"
+            )
             context.close()
             browser.close()
     finally:

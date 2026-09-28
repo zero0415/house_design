@@ -1879,3 +1879,7 @@ p { margin: 6px 0 10px; }
 }
 .control-target input { flex: 0 0 auto; margin-top: 5px; }
 .control-target span { overflow-wrap: anywhere; min-width: 0; }
+.door-pending-label {
+    font-size: 13px; fill: #70501e; paint-order: stroke;
+    stroke: #fff; stroke-width: 3px;
+}

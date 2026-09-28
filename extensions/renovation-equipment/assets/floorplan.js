@@ -20,6 +20,9 @@ import {
     isDedicatedCircuit, isQuotedOutlet, isSocket, isWeakCurrent,
 } from "./socket-plan.js";
 import { isQuotedEquipment } from "./budget.js";
+import {
+    isQuotedDoor, isUnquotedBalconyDoor,
+} from "./door-allocation.js";
 import { markerQuoteProvenance, quoteProvenance } from "./quote-provenance.js";
 import {
     isConditionalFloorDryer, isConditionalOutboardSink, laundryMarkerNote,
@@ -542,7 +545,8 @@ function directionName(orientation) {
 function selectedDoor(door, items) {
     const choice = items.find((item) => item.kind === "door" && item.doorId === door.id);
     return choice ? {
-        ...door, kind: choice.doorOpeningKind, quoted: true,
+        ...door, label: choice.name, kind: choice.doorOpeningKind,
+        quoted: isQuotedDoor(choice),
         length: choice.widthCm ? choice.widthCm * PLAN_PIXELS_PER_CM : door.length,
         widthCm: choice.widthCm ?? null, heightCm: choice.heightCm ?? null,
         material: choice.doorMaterial, materialLabel: choice.brandModel,
@@ -631,11 +635,12 @@ function renderDoor(door, items, overview, showDimension = true, interactive = t
         ${chosen.kind} ${chosen.glass ? "glass" : ""} ${chosen.quoted ? "" : "unpriced"}
         material-${escapeSvg(chosen.material)}"
         data-door-material="${escapeSvg(chosen.material)}"
+        data-plan-door-id="${escapeSvg(chosen.id)}"
         ${quoteMarkerAttributes(source)}
         ${overview && interactive ? `data-select-room="${escapeSvg(chosen.owner)}"
             role="button" tabindex="0"` : source ? 'role="img" tabindex="0"' : ""}
         aria-label="${escapeSvg(chosen.label)}（${escapeSvg(chosen.materialLabel)}；
-            ${chosen.quoted ? "已列原報價" : "未列門片報價"}）">
+            ${chosen.quoted ? "已列原報價" : "未計算，未列門片報價"}）">
         <title>${escapeSvg(chosen.label)}；${escapeSvg(chosen.materialLabel)}；
             ${chosen.widthCm ?
             `門洞淨寬 ${chosen.widthCm}cm` : "門洞淨寬待量，開口線僅示意"}；
@@ -643,6 +648,9 @@ function renderDoor(door, items, overview, showDimension = true, interactive = t
             ${chosen.quoted ? "原報價已有此門片，門型變更需重新估價" :
                 "新增或既有入口，未列入本次門片報價"}${source ? `；${escapeSvg(source)}` : ""}</title>
         ${doorShape(chosen)}
+        ${isUnquotedBalconyDoor(item) && item.unitPrice === null
+            ? `<text class="door-pending-label" x="${chosen.x}"
+                y="${chosen.y + 25}" text-anchor="middle">未計算</text>` : ""}
         ${overview ? `<rect class="door-hitbox" x="${chosen.x - 18}" y="${chosen.y - 18}"
             width="36" height="36"/>
             <text class="door-overview-label" x="${chosen.x}" y="${chosen.y + 6}"

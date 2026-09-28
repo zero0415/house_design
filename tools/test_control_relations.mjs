@@ -33,6 +33,10 @@ const firstSwitch = "quoted-switch-01";
 const secondSwitch = "quoted-switch-02";
 const track = "corridor-track-lighting";
 const ceiling = "living-ceiling-light-01";
+const capabilities = {
+    controlRelationsVersion: CONTROL_RELATIONS_VERSION,
+    doorAllocationVersion: 1,
+};
 
 function assigned() {
     const state = structuredClone(baseline);
@@ -45,7 +49,7 @@ function assigned() {
 test("anonymous v5 sample remains untouched, with no inferred same-room or cross-room links", () => {
     assert.deepEqual([publicSample.version, publicSample.revision,
         publicSample.undo, publicSample.rooms.length, publicSample.items.length,
-        publicSample.products.length], [5, 0, null, 13, 180, 28]);
+        publicSample.products.length], [5, 0, null, 13, 181, 28]);
     assert.equal(baseline.products.find((product) =>
         product.id === "sample-product-08").trackLengthCm, 150);
     assert.deepEqual(baseline.items, publicSample.items);
@@ -61,14 +65,14 @@ test("anonymous v5 sample remains untouched, with no inferred same-room or cross
     }
     assert.deepEqual(previewCircuitLinks(baseline.items), []);
     assert.equal(hasControlRelations(baseline), false);
-    assert.equal(JSON.parse(encodeSave(baseline)).formatVersion, 5);
+    assert.equal(JSON.parse(encodeSave(baseline)).formatVersion, 7);
     assert.doesNotMatch(renderOverviewPlan(baseline.rooms, baseline.items, false,
         new Set()), /data-preview-light-id=/);
     const lighting = renderElectricalSheet(baseline, "lighting-sheet");
     assert.doesNotMatch(lighting, /data-control-light-id=/);
     assert.match(lighting, /尚未設定對應 14/);
     assert.equal((lighting.match(/data-sheet-switch=/g) ?? []).length, 14);
-    assert.equal(summarize(baseline).overallTotals.TWD, 2_318_560.2);
+    assert.equal(summarize(baseline).overallTotals.TWD, 2_322_060.2);
 });
 
 test("explicit whole-panel many-to-many mapping drives sheets and preview, including track group", () => {
@@ -133,10 +137,10 @@ test("reject malformed, orphaned, removed or unplaced controls without mutating 
     assert.equal(previewCircuitLinks(stale.items).length, 0);
 });
 
-test("container 6 and CSV retain mappings, while old unmapped JSON remains container 5", () => {
+test("container 7 retains controls with door attribution and CSV keeps mapped IDs", () => {
     const state = assigned();
     const document = JSON.parse(encodeSave(state));
-    assert.equal(document.formatVersion, 6);
+    assert.equal(document.formatVersion, 7);
     assert.equal(document.state.version, 5);
     assert.deepEqual(decodeSave(JSON.stringify(document)),
         { ...snapshot(state), undo: state.undo });
@@ -150,9 +154,9 @@ test("container 6 and CSV retain mappings, while old unmapped JSON remains conta
     })), /v5 資料/);
     const undoOnly = structuredClone(baseline);
     undoOnly.undo = snapshot(state);
-    assert.equal(JSON.parse(encodeSave(undoOnly)).formatVersion, 6);
+    assert.equal(JSON.parse(encodeSave(undoOnly)).formatVersion, 7);
     assert.deepEqual(decodeSave(encodeSave(undoOnly)).undo, undoOnly.undo);
-    assert.equal(JSON.parse(encodeSave(baseline)).formatVersion, 5);
+    assert.equal(JSON.parse(encodeSave(baseline)).formatVersion, 7);
     assert.deepEqual(decodeSave(encodeSave(baseline)),
         { ...snapshot(baseline), undo: null });
     for (const version of [2, 3, 4, 5]) {
@@ -194,7 +198,7 @@ test("guarded store rejects old writer or orphan, supports clearing and one comp
         item(candidate, secondSwitch).controlledLightIds = [ceiling];
         candidate.undo = snapshot(latest);
         const saved = await store.update(latest.revision, {
-            ...candidate, controlRelationsVersion: CONTROL_RELATIONS_VERSION,
+            ...candidate, ...capabilities,
         });
         assert.deepEqual(saved.undo, snapshot(latest));
         assert.deepEqual(snapshot(saved), snapshot(candidate));
@@ -210,7 +214,7 @@ test("guarded store rejects old writer or orphan, supports clearing and one comp
         const orphan = structuredClone(saved);
         orphan.items = orphan.items.filter((entry) => entry.id !== ceiling);
         await assert.rejects(() => store.update(saved.revision, {
-            ...orphan, controlRelationsVersion: CONTROL_RELATIONS_VERSION,
+            ...orphan, ...capabilities,
         }), (error) => error instanceof StoreError && error.status === 400 &&
             /不存在/.test(error.message));
         assert.equal(await readFile(file, "utf8"), bytes);
@@ -220,12 +224,11 @@ test("guarded store rejects old writer or orphan, supports clearing and one comp
         }
         cleared.undo = snapshot(saved);
         const next = await store.update(saved.revision, {
-            ...cleared, controlRelationsVersion: CONTROL_RELATIONS_VERSION,
+            ...cleared, ...capabilities,
         });
         assert.equal(previewCircuitLinks(next.items).length, 0);
         const restored = await store.update(next.revision, {
-            version: 5, ...next.undo, undo: null,
-            controlRelationsVersion: CONTROL_RELATIONS_VERSION,
+            version: 5, ...next.undo, undo: null, ...capabilities,
         });
         assert.deepEqual(snapshot(restored), snapshot(saved));
         assert.equal(previewCircuitLinks(restored.items).length, 3);

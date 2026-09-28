@@ -15,6 +15,11 @@ import {
     CONTROL_RELATIONS_CAUTION, hasControlRelations,
 } from "./circuit-preview.js";
 import {
+    hasDoorAllocation, isQuotedDoor, isUnquotedBalconyDoor,
+} from "./door-allocation.js";
+import { isSlideTrack } from "./budget.js";
+import { quoteProvenance } from "./quote-provenance.js";
+import {
     BATHROOM_INSTALLATION_QUOTE, isBathroomInstallationIncluded,
 } from "./bathroom-installation.js";
 
@@ -30,7 +35,8 @@ export function encodeSave(state, exportedAt = new Date().toISOString()) {
     }
     return JSON.stringify({
         format: SAVE_FORMAT,
-        formatVersion: hasControlRelations(state) ? 6 : SAVE_FORMAT_VERSION,
+        formatVersion: hasDoorAllocation(state) ? 7 :
+            hasControlRelations(state) ? 6 : SAVE_FORMAT_VERSION,
         exportedAt,
         state: {
             version: PLANNER_STATE_VERSION,
@@ -59,7 +65,7 @@ export function decodeSave(text) {
     const unwrapped = versions.includes(document?.version) &&
         document?.format === undefined;
     if (!unwrapped && (document?.format !== SAVE_FORMAT ||
-        ![...versions, 6].includes(document?.formatVersion))) {
+        ![...versions, 6, 7].includes(document?.formatVersion))) {
         throw new RangeError("存檔格式或版本不相容；請使用本規劃器匯出的 JSON。");
     }
     const imported = unwrapped ? document : document.state;
@@ -67,6 +73,11 @@ export function decodeSave(text) {
         (imported?.version !== PLANNER_STATE_VERSION ||
             !hasControlRelations(imported))) {
         throw new RangeError("新版開關對應存檔須含 v5 資料及完整對應欄位，未改動目前規劃。");
+    }
+    if (!unwrapped && document.formatVersion === 7 &&
+        (imported?.version !== PLANNER_STATE_VERSION ||
+            !hasDoorAllocation(imported))) {
+        throw new RangeError("新版門片歸屬存檔須含 v5 資料及完整門片欄位，未改動目前規劃。");
     }
     if (!versions.includes(imported?.version) ||
         !Array.isArray(imported.rooms) ||
@@ -104,6 +115,7 @@ const CSV_COLUMNS = Object.freeze([
     "來源標位 ID", "標位類型（示意，非施工核可）",
     "冷氣規劃狀態", "冷氣施工費（未核）", "單條燈軌長度（cm）",
     "面板對應燈具ID", "開關對應狀態（非施工）",
+    "門位ID", "開門方式", "軌道對應門位", "歷史報價與歸屬說明",
 ]);
 
 export function itemListCsv(state) {
@@ -111,8 +123,9 @@ export function itemListCsv(state) {
         throw new TypeError("無有效設備資料，無法輸出物件清單。");
     }
     const rooms = new Map(state.rooms.map((room) => [room.id, room]));
-    const rows = state.items.filter((item) => item.placement != null &&
-        item.kind !== "door" && item.acPlanStatus !== "excluded" &&
+    const rows = state.items.filter((item) =>
+        (item.placement != null || item.kind === "door" || isSlideTrack(item)) &&
+        item.acPlanStatus !== "excluded" &&
         item.switchPlanStatus !== "removed").map((item) => {
         if (!rooms.has(item.roomId)) {
             throw new RangeError(`物件「${item.name}」所屬房間不存在，未匯出清單。`);
@@ -121,7 +134,8 @@ export function itemListCsv(state) {
         const installation = installationSubtotal(item);
         const bathroomInstallationIncluded = isBathroomInstallationIncluded(item);
         const spotlights = spotlightSubtotal(item);
-        const quote = isQuotedEquipment(item);
+        const quote = isQuotedDoor(item) || isQuotedEquipment(item);
+        const pending = isUnquotedBalconyDoor(item) ? "未計算" : "待補";
         return [
             rooms.get(item.roomId).name,
             isWeakCurrent(item) ? "弱電 C 埠（非電源）" :
@@ -130,7 +144,7 @@ export function itemListCsv(state) {
                 ({ furniture: "家具／其他", lights: "燈", switches: "開關",
                     outlets: "插座", structure: "門牆" })[planDisplayCategory(item)],
             item.name, item.brandModel, item.quantity ?? "待補", item.unit,
-            item.unitPrice ?? "待補", item.priceCurrency, amount ?? "待補",
+            item.unitPrice ?? pending, item.priceCurrency, amount ?? pending,
             bathroomInstallationIncluded ? 0 : installation === 0 ? "" :
                 installation ?? "待補",
             bathroomInstallationIncluded
@@ -143,8 +157,8 @@ export function itemListCsv(state) {
             quote ? "是" : "否",
             item.outletCircuit ?? "",
             item.circuitOutletId ?? "",
-            Math.round(item.placement.x * 1000) / 10,
-            Math.round(item.placement.y * 1000) / 10,
+            item.placement ? Math.round(item.placement.x * 1000) / 10 : "",
+            item.placement ? Math.round(item.placement.y * 1000) / 10 : "",
             item.outdoorPlacement ? outdoorACZone(item).label :
                 isSplitAirConditioner(item) ? "未確認室外機位／對外路徑，非可施工配置" : "",
             item.outdoorWidthCm && item.outdoorDepthCm
@@ -166,6 +180,10 @@ export function itemListCsv(state) {
             item.switchType ? (item.controlledLightIds ?? []).join(" | ") : "",
             item.switchType ? item.controlledLightIds?.length
                 ? CONTROL_RELATIONS_CAUTION : "尚未設定對應" : "",
+            item.doorId ?? "", item.doorOpeningKind ?? "",
+            item.trackDoorId ?? "",
+            item.kind === "door" || isSlideTrack(item)
+                ? quoteProvenance(item) : "",
         ].map(csvCell).join(",");
     });
     return "\ufeff" + [CSV_COLUMNS.map(csvCell).join(","), ...rows].join("\r\n") + "\r\n";

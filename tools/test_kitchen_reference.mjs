@@ -69,11 +69,11 @@ test("fixed drawing warns about unverified clearances without changing public da
         source);
     assert.equal(state.revision, 0);
     assert.equal(state.undo, null);
-    assert.equal(state.items.length, 180);
+    assert.equal(state.items.length, 181);
     assert.equal(state.products.length, 28);
     assert.equal(ORIGINAL_QUOTE_TWD, 1_959_530);
     assert.equal(calculatePlanTotal(calculateBudget(state.items, { wholePlan: true })).TWD,
-        2_318_560.2);
+        2_322_060.2);
 });
 
 test("pure guarded public V migration changes only two anonymous cabinet records", async () => {
@@ -100,7 +100,7 @@ test("pure guarded public V migration changes only two anonymous cabinet records
     assert.deepEqual([outcome.addedItems, outcome.addedProducts], [0, 0]);
     const next = outcome.state;
     validateState(next);
-    assert.equal(next.items.length, 180);
+    assert.equal(next.items.length, 181);
     assert.equal(next.products.length, 28);
     assert.deepEqual(next.rooms, original.rooms);
     assert.deepEqual(next.products, original.products);

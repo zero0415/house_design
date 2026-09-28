@@ -34,16 +34,26 @@ class PublicSnapshotTests(unittest.TestCase):
     def test_public_docs_match_derived_sample(self):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         quote = QUOTE.read_text(encoding="utf-8")
-        for value in ("51", "9", "7", "27,000", "51,500", "2,318,560.20",
+        for value in ("51", "9", "7", "27,000", "51,500", "2,322,060.20",
                       "16,000", "10 筆", "NT$0", "14,994", "3,960",
                       "26,936", "NT$6,600", "NT$13,200", "1,215",
                       "140,088", "21,032", "GPR-23HI", "4 坪內",
-                      "4,684", "967.20", "42,500", "210,612.20",
+                      "4,684", "967.20", "42,500", "214,112.20",
                       "59.8", "55", "B06", "81cm", "82×48cm"):
             with self.subTest(value=value):
                 self.assertIn(value, readme)
                 self.assertIn(value, quote)
-        self.assertIn("180 個物件與 28 款商品", readme)
+        self.assertIn("181 個物件與 28 款商品", readme)
+        for value in ("原兩組各 **NT$19,000 木纖滑門**", "原報軌道額度",
+                      "臥室3↔工作室", "未計算", "不自動新增費用",
+                      "不自動新增費用、扣款或退還主浴軌道額度",
+                      "門片重歸屬", "容器 **7**",
+                      "renovation-equipment-offline-doors-v1"):
+            with self.subTest(doors=value):
+                self.assertIn(value, readme)
+        self.assertIn("三個主浴門位", readme)
+        self.assertIn("兩筆各 **0.8 米", quote)
+        self.assertIn("門片工程原報價 **164,500 元**", quote)
         self.assertIn("沒有發布原始工程／電源配置 PDF", readme)
         self.assertIn("廚房／客浴／陽台附件", readme)
         self.assertIn("不自動移入屋內", readme)
@@ -101,11 +111,11 @@ class PublicSnapshotTests(unittest.TestCase):
         self.assertEqual((state["version"], state["revision"], state["undo"]), (5, 0, None))
         self.assertEqual(state["updatedAt"], "2026-01-01T00:00:00.000Z")
         self.assertEqual((len(state["rooms"]), len(state["items"]), len(state["products"])),
-                         (13, 180, 28))
+                         (13, 181, 28))
         rooms = {room["id"] for room in state["rooms"]}
         products = {product["id"] for product in state["products"]}
         self.assertEqual(len(products), 28)
-        self.assertEqual(len({item["id"] for item in state["items"]}), 180)
+        self.assertEqual(len({item["id"] for item in state["items"]}), 181)
         self.assertEqual({room["name"] for room in state["rooms"] if room["id"].startswith(
             "bedroom-")}, {"臥室1", "臥室2", "臥室3"})
         self.assertTrue(all(item["roomId"] in rooms and
@@ -452,7 +462,47 @@ class PublicSnapshotTests(unittest.TestCase):
                              for item in state["items"]))
         self.assertEqual((len(state["rooms"]), len(state["items"]),
                           len(state["products"]), state["revision"], state["undo"]),
-                         (13, 180, 28, 0, None))
+                         (13, 181, 28, 0, None))
+
+    def test_quoted_door_and_rail_allowances_are_reassigned_not_repriced(self):
+        state = json.loads(SAMPLE.read_text(encoding="utf-8"))
+        items = {item["id"]: item for item in state["items"]}
+        doors = [item for item in state["items"] if item["kind"] == "door"]
+        self.assertEqual(len(doors), 12)
+        self.assertEqual(sum(door["quotedQuantity"] * door["quotedUnitPrice"]
+                             for door in doors), 114_500)
+        rails = [item for item in state["items"] if item["trackDoorId"]]
+        self.assertEqual({item["id"] for item in rails},
+                         {"track-main-bath-hall", "track-bedroom-3-studio"})
+        self.assertEqual(sum(item["quotedQuantity"] * item["quotedUnitPrice"]
+                             for item in rails), 2_880)
+        self.assertEqual({item["trackDoorId"]: item["quantity"] for item in rails},
+                         {"bedroom-2": .8, "bedroom-3-studio": .8})
+        self.assertEqual({item["id"] for item in state["items"]
+                          if item.get("doorQuoteAllocation") == 1}, {
+                              "door-balcony", "door-bedroom-3-studio",
+                              "track-main-bath-hall", "track-bedroom-3-studio",
+                          })
+        self.assertEqual((items["door-balcony"]["doorMaterial"],
+                          items["door-balcony"]["unitPrice"],
+                          items["door-balcony"]["quotedUnitPrice"]),
+                         ("custom", None, 0))
+        self.assertEqual((items["door-bedroom-3-studio"]["doorMaterial"],
+                          items["door-bedroom-3-studio"]["unitPrice"],
+                          items["door-bedroom-3-studio"]["quotedUnitPrice"]),
+                         ("wood-slide", 19_000, 19_000))
+        self.assertEqual((items["door-main-bath-hall"]["doorOpeningKind"],
+                          items["door-main-bath-hall"]["unitPrice"],
+                          items["door-main-bath-master"]["doorMaterial"],
+                          items["door-main-bath-master"]["unitPrice"]),
+                         ("swing", 8_500, "solid-wood", 14_000))
+        self.assertEqual(len({item["id"] for item in
+                              state["items"] if item.get("lightType") in
+                              {"ceiling", "track", "recessed"} and
+                              item.get("placement")}), 16)
+        self.assertFalse(any("controlledLightIds" in item
+                             for item in state["items"]))
+        self.assertIsNone(state["undo"])
 
     def test_balcony_swap_keeps_old_floor_geometry_and_unpriced_new_basin(self):
         state = json.loads(SAMPLE.read_text(encoding="utf-8"))
@@ -502,6 +552,7 @@ class PublicSnapshotTests(unittest.TestCase):
                      "bathroom-installation.js", "laundry-notes.js",
                      "quote-provenance.js", "guest-bath-plan.js",
                      "balcony-plan.js", "electrical-sheets.js",
+                     "door-allocation.js",
                      "circuit-preview.js", "file-actions.js"):
             self.assertIn(f"assets/{name}", {entry["path"] for entry in bundle["modules"]})
         for name in ("corridor-plan.js", "air-conditioning-plan.js"):

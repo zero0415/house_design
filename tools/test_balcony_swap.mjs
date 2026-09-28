@@ -62,9 +62,9 @@ test("published sample is anonymous v5 with one unpriced basin and unchanged pri
     validateState(sample);
     assert.deepEqual([sample.version, sample.revision, sample.undo,
         sample.rooms.length, sample.items.length, sample.products.length],
-    [5, 0, null, 13, 180, 28]);
+    [5, 0, null, 13, 181, 28]);
     assert.equal(sample.updatedAt, "2026-01-01T00:00:00.000Z");
-    assert.equal(new Set(sample.items.map((entry) => entry.id)).size, 180);
+    assert.equal(new Set(sample.items.map((entry) => entry.id)).size, 181);
     assert.deepEqual([sink.roomId, sink.kind, sink.widthCm, sink.depthCm,
         sink.heightCm, sink.unitPrice, sink.installationUnitPrice,
         sink.productId, sink.equipmentCategory, sink.markerStyle],
@@ -72,8 +72,8 @@ test("published sample is anonymous v5 with one unpriced basin and unchanged pri
     assert.equal(sink.lightSpecSource, "");
     assert.match(sink.note, /盛水荷重未知.*可靠混凝土結構.*不能以原鐵窗作承重依據/);
     assert.equal(summarize(sample).originalQuoteTWD, 1_959_530);
-    assert.equal(summarize(sample).overallTotals.TWD, 2_318_560.2);
-    assert.equal(summarize(previous).overallTotals.TWD, 2_318_560.2);
+    assert.equal(summarize(sample).overallTotals.TWD, 2_322_060.2);
+    assert.equal(summarize(previous).overallTotals.TWD, 2_322_060.2);
     assert.equal(sample.items.filter((entry) => entry.outletPlanPointId).length, 67);
     assert.equal(sample.items.filter((entry) => entry.lightWatts === 50).length, 8);
     assert.equal(product(sample, "sample-product-26").unitPrice, 20599);
@@ -96,7 +96,10 @@ test("guarded conversion touches only three existing items, new basin and one ne
     assert.deepEqual(previous, original);
     validateState(after);
     assert.deepEqual(after.undo, snapshot(previous));
-    assert.deepEqual({ ...after, undo: null }, sample);
+    const sortItems = (state) => [...state.items].sort((a, b) =>
+        a.id.localeCompare(b.id));
+    assert.deepEqual({ ...after, items: sortItems(after), undo: null },
+        { ...sample, items: sortItems(sample) });
     assert.deepEqual(after.rooms, previous.rooms);
     assert.deepEqual(after.items.filter((entry) =>
         !migrated.changedItemIds.includes(entry.id)),
@@ -252,14 +255,21 @@ test("store retains one full Undo and rejects stale revision; sample itself has 
         const store = createStore(path);
         const latest = await store.read();
         const reviewed = migrateBalconySwap(latest).state;
-        const written = await store.update(latest.revision, reviewed);
+        const capabilities = {
+            controlRelationsVersion: 1, doorAllocationVersion: 1,
+        };
+        const written = await store.update(latest.revision, {
+            ...reviewed, ...capabilities,
+        });
         assert.deepEqual(written.items, reviewed.items);
         assert.deepEqual(written.products, reviewed.products);
         assert.deepEqual(written.undo, snapshot(latest));
-        await assert.rejects(() => store.update(latest.revision, reviewed),
+        await assert.rejects(() => store.update(latest.revision, {
+            ...reviewed, ...capabilities,
+        }),
             (error) => error instanceof StoreError && error.status === 409);
         const undone = await store.update(written.revision, {
-            version: 5, ...written.undo, undo: null,
+            version: 5, ...written.undo, undo: null, ...capabilities,
         });
         assert.deepEqual(snapshot(undone), snapshot(latest));
         assert.equal(sample.undo, null);

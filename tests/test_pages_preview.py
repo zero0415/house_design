@@ -39,8 +39,54 @@ INCLUDED_BATHROOM_IDS = {
 }
 
 
-def previous_public_balcony_save():
+def previous_public_door_save():
     state = json.loads(SAMPLE.read_text(encoding="utf-8"))
+    state["items"] = [item for item in state["items"]
+                      if item["id"] != "door-bedroom-3-studio"]
+    by_id = {item["id"]: item for item in state["items"]}
+    previous_note = (
+        "已含在原報價；切換材質後的價差僅供規劃，實際價格須廠商確認。"
+    )
+    previous_track_note = (
+        "原報價「滑門軌道－主浴.工作室」合計 1.6 米 × 1,800 元＝2,880 元；\n"
+        "            依屋主指示暫分這道拉門 0.8 米、1,440 元。軌道長度為暫估，\n"
+        "            未含於此筆的門片本體仍須另議；取消或轉用已含軌道門片的減項須廠商確認。"
+    )
+    by_id["door-balcony"].update(
+        brandModel="木纖滑門", doorMaterial="wood-slide", unitPrice=19000,
+        quotedUnitPrice=19000, priceSource="原報價｜門片工程",
+        note=previous_note,
+    )
+    del by_id["door-balcony"]["doorQuoteAllocation"]
+    by_id["door-bedroom-2"]["note"] = previous_note
+    by_id["door-main-bath-master"].update(
+        brandModel="木纖門", doorMaterial="wood-fiber", unitPrice=10500,
+        priceSource="原報價門片單價（跨材質試算，待廠商確認）",
+        note=previous_note,
+    )
+    by_id["door-main-bath-hall"].update(
+        doorOpeningKind="slide",
+        note=previous_note +
+             " 新配置確認通客餐廳為拉門；目前單價仍沿用原塑鋼廁所門報價基準，"
+             "拉門滑軌與施工價差須請廠商重報，未自動計入追加。",
+    )
+    by_id["track-main-bath-hall"].update(
+        roomId="bath-main", trackDoorId="main-bath-hall",
+        name="滑門軌道－主浴門", priceSource="原報價｜輕隔間工程",
+        note=previous_track_note,
+    )
+    del by_id["track-main-bath-hall"]["doorQuoteAllocation"]
+    by_id["track-bedroom-3-studio"].update(
+        priceSource="原報價｜輕隔間工程",
+        note=previous_track_note,
+    )
+    del by_id["track-bedroom-3-studio"]["doorQuoteAllocation"]
+    assert len(state["items"]) == 180
+    return state
+
+
+def previous_public_balcony_save():
+    state = previous_public_door_save()
     state["items"] = [item for item in state["items"]
                       if item["id"] != "balcony-outboard-sink"]
     by_id = {item["id"]: item for item in state["items"]}
@@ -198,7 +244,7 @@ class PagesPreviewTests(unittest.TestCase):
             page.on("pageerror", lambda error: errors.append(str(error)))
             self.open_demo(page)
             self.assertEqual(page.locator(".overview-svg .plan-zone").count(), 13)
-            self.assertEqual(page.locator("#overall-total").inner_text(), "NT$2,318,560.2")
+            self.assertEqual(page.locator("#overall-total").inner_text(), "NT$2,322,060.2")
             self.assertEqual(page.locator(".overview-svg [data-outlet-point-id]").count(), 67)
             for prefix, count in (("R", 51), ("B", 9), ("C", 7)):
                 self.assertEqual(page.locator(
@@ -216,6 +262,9 @@ class PagesPreviewTests(unittest.TestCase):
             self.assertIsNone(page.evaluate(
                 "localStorage.getItem('renovation-equipment-offline-controls-v1:' + location.pathname)"
             ))
+            self.assertIsNone(page.evaluate(
+                "localStorage.getItem('renovation-equipment-offline-doors-v1:' + location.pathname)"
+            ))
             page.locator('.overview-svg .plan-zone[data-select-room="bedroom-1"]').click()
             height = page.locator(
                 'input[data-room-dimension="ceilingHeightCm"][data-room-id="bedroom-1"]'
@@ -224,12 +273,15 @@ class PagesPreviewTests(unittest.TestCase):
             height.press("Tab")
             page.wait_for_function("""() => {
                 const saved = localStorage.getItem(
-                    'renovation-equipment-offline-controls-v1:' + location.pathname);
+                    'renovation-equipment-offline-doors-v1:' + location.pathname);
                 return saved && JSON.parse(saved).rooms.find(
                     room => room.id === 'bedroom-1').ceilingHeightCm === 270;
             }""", timeout=15000)
             self.assertIsNone(page.evaluate(
                 "localStorage.getItem('renovation-equipment-offline-v1:' + location.pathname)"
+            ))
+            self.assertIsNone(page.evaluate(
+                "localStorage.getItem('renovation-equipment-offline-controls-v1:' + location.pathname)"
             ))
             page.reload()
             page.wait_for_function(
@@ -238,7 +290,7 @@ class PagesPreviewTests(unittest.TestCase):
             )
             state = page.evaluate("globalThis.__RENOVATION_OFFLINE_STORE__.read()")
             self.assertEqual(state["rooms"][3]["ceilingHeightCm"], 270)
-            self.assertEqual((len(state["items"]), len(state["products"])), (180, 28))
+            self.assertEqual((len(state["items"]), len(state["products"])), (181, 28))
             self.assertEqual(len([url for url in requests if "/files/" in url]), 1)
             self.assertEqual(errors, [])
         finally:
@@ -256,9 +308,9 @@ class PagesPreviewTests(unittest.TestCase):
             self.open_demo(page)
             state = page.evaluate("globalThis.__RENOVATION_OFFLINE_STORE__.read()")
             self.assertEqual((len(state["items"]), len(state["products"]),
-                              state["revision"], state["undo"]), (180, 28, 0, None))
+                              state["revision"], state["undo"]), (181, 28, 0, None))
             self.assertEqual(page.locator("#overall-total").inner_text(),
-                             "NT$2,318,560.2")
+                             "NT$2,322,060.2")
             overview = page.locator(".overview-svg")
             self.assertEqual(overview.locator(".fixed-balcony-sink").count(), 1)
             self.assertEqual(overview.locator(
@@ -360,7 +412,7 @@ class PagesPreviewTests(unittest.TestCase):
                 page.wait_for_function("Boolean(globalThis.__RENOVATION_OFFLINE_STORE__)")
                 page.locator("#load-file-input").set_input_files(str(SAMPLE))
                 page.wait_for_function(
-                    "document.querySelector('#overall-total').textContent.includes('2,318,560')",
+                    "document.querySelector('#overall-total').textContent.includes('2,322,060')",
                     timeout=15000,
                 )
                 for tab_name in ("插座配置圖", "燈具配置圖"):
@@ -672,7 +724,7 @@ class PagesPreviewTests(unittest.TestCase):
                 self.assertIsNotNone(imported["undo"])
                 budget = page.locator(".budget").inner_text()
                 storage_before = page.evaluate(
-                    "localStorage.getItem('renovation-equipment-offline-controls-v1:' + location.pathname)"
+                    "localStorage.getItem('renovation-equipment-offline-doors-v1:' + location.pathname)"
                 )
                 page.get_by_role("tab", name="插座配置圖", exact=True).click()
                 self.assertEqual(page.locator("[data-sheet-point]").count(), 67)
@@ -688,7 +740,7 @@ class PagesPreviewTests(unittest.TestCase):
                     "globalThis.__RENOVATION_OFFLINE_STORE__.read()"), imported)
                 self.assertEqual(page.locator(".budget").inner_text(), budget)
                 self.assertEqual(page.evaluate(
-                    "localStorage.getItem('renovation-equipment-offline-controls-v1:' + location.pathname)"
+                    "localStorage.getItem('renovation-equipment-offline-doors-v1:' + location.pathname)"
                 ), storage_before)
                 with page.expect_download() as download:
                     page.locator("#save-file").click()
@@ -735,11 +787,11 @@ class PagesPreviewTests(unittest.TestCase):
             baseline = page.evaluate("globalThis.__RENOVATION_OFFLINE_STORE__.read()")
             budget = page.locator(".budget").inner_text()
             self.assertEqual((len(baseline["items"]), baseline["revision"],
-                              baseline["undo"]), (180, 0, None))
+                              baseline["undo"]), (181, 0, None))
             self.assertFalse(any("controlledLightIds" in item
                                  for item in baseline["items"]))
             self.assertIsNone(page.evaluate(
-                "localStorage.getItem('renovation-equipment-offline-controls-v1:' + location.pathname)"
+                "localStorage.getItem('renovation-equipment-offline-doors-v1:' + location.pathname)"
             ))
             page.locator('[data-action="toggle-light-preview"]').click()
             self.assertEqual(page.locator("[data-preview-light-id]").count(), 0)
@@ -770,7 +822,7 @@ class PagesPreviewTests(unittest.TestCase):
                 "globalThis.__RENOVATION_OFFLINE_STORE__.read()"), baseline)
             self.assertEqual(page.locator(".budget").inner_text(), budget)
             self.assertIsNone(page.evaluate(
-                "localStorage.getItem('renovation-equipment-offline-controls-v1:' + location.pathname)"
+                "localStorage.getItem('renovation-equipment-offline-doors-v1:' + location.pathname)"
             ))
             page.locator("#control-relations-form button").click()
             page.wait_for_function("""async () => {
@@ -797,7 +849,7 @@ class PagesPreviewTests(unittest.TestCase):
                 "localStorage.getItem('renovation-equipment-offline-v1:' + location.pathname)"
             ))
             stored = json.loads(page.evaluate(
-                "localStorage.getItem('renovation-equipment-offline-controls-v1:' + location.pathname)"
+                "localStorage.getItem('renovation-equipment-offline-doors-v1:' + location.pathname)"
             ))
             self.assertEqual(stored["revision"], 1)
 
@@ -805,7 +857,7 @@ class PagesPreviewTests(unittest.TestCase):
                 page.locator("#save-file").click()
             exported = json.loads(Path(
                 download.value.path()).read_text(encoding="utf-8"))
-            self.assertEqual(exported["formatVersion"], 6)
+            self.assertEqual(exported["formatVersion"], 7)
             self.assertEqual(exported["state"]["items"], updated["items"])
             self.assertEqual(exported["state"]["undo"], updated["undo"])
             page.reload()
@@ -865,6 +917,7 @@ class PagesPreviewTests(unittest.TestCase):
                 try {
                     await globalThis.__RENOVATION_OFFLINE_STORE__.update({
                         ...malformed, expectedRevision: original.revision, undo: null,
+                        controlRelationsVersion: 1, doorAllocationVersion: 1,
                     });
                 } catch (error) { weakRejected = /弱電|來源標位/.test(error.message); }
                 const overview = renderOverviewPlan(original.rooms,original.items);
@@ -926,7 +979,7 @@ class PagesPreviewTests(unittest.TestCase):
                 };
             }""")
             self.assertEqual(report["quote"], 1_959_530)
-            self.assertEqual(report["plan"], 2_318_560.2)
+            self.assertEqual(report["plan"], 2_322_060.2)
             self.assertEqual(report["kitchenAdditions"], 94_000)
             self.assertEqual((report["weakAdditions"], report["weakQuoted"]), (0, 21_000))
             self.assertEqual(report["counts"], {
@@ -1064,7 +1117,7 @@ class PagesPreviewTests(unittest.TestCase):
                 page.wait_for_function("Boolean(globalThis.__RENOVATION_OFFLINE_STORE__)")
                 page.locator("#load-file-input").set_input_files(str(SAMPLE))
                 page.wait_for_function(
-                    "document.querySelector('#overall-total').textContent.includes('2,318,560')",
+                    "document.querySelector('#overall-total').textContent.includes('2,322,060')",
                     timeout=15000,
                 )
                 page.locator('.plan-zone[data-select-room="kitchen"]').click()
@@ -1182,9 +1235,9 @@ class PagesPreviewTests(unittest.TestCase):
                              ["kitchen-plan-tower", "kitchen-plan-return"]
                              if report["changed"] else [])
             self.assertEqual((report["itemCount"], report["productCount"],
-                              report["revision"]), (180, 28, 0))
+                              report["revision"]), (181, 28, 0))
             self.assertEqual((report["baseline"], report["total"]),
-                             (1_959_530, 2_318_560.2))
+                             (1_959_530, 2_322_060.2))
             for key in ("roomsUntouched", "productsUntouched", "sourceUntouched",
                         "anchorsUntouched", "fillValid", "fillExtends",
                         "overviewFill", "roomFill", "invalidFill", "referenceL",
@@ -1254,7 +1307,8 @@ class PagesPreviewTests(unittest.TestCase):
                     item.productId === product.id ?
                         applyProductToItem(repriced,item) : item);
                 const saved = await globalThis.__RENOVATION_OFFLINE_STORE__.update({
-                    ...changed,expectedRevision:original.revision,undo:null});
+                    ...changed,expectedRevision:original.revision,undo:null,
+                    controlRelationsVersion:1,doorAllocationVersion:1});
                 const after = calculatePlanTotal(calculateBudget(saved.items,
                     {wholePlan:true})).TWD;
                 const exported = decodeSave(encodeSave(saved));
@@ -1282,7 +1336,7 @@ class PagesPreviewTests(unittest.TestCase):
                 };
             }""")
             self.assertEqual((report["quote"], report["before"], report["after"]),
-                             (1_959_530, 2_318_560.2, 2_319_360.2))
+                             (1_959_530, 2_322_060.2, 2_322_860.2))
             self.assertEqual((report["products"], report["originalCeilings"]),
                              (28, 9))
             self.assertEqual((report["selectedCount"], report["repricedCount"],
@@ -1315,7 +1369,7 @@ class PagesPreviewTests(unittest.TestCase):
                     if request.url.startswith(("http:", "https:")) else None)
             self.open_demo(page)
             self.assertEqual(page.locator("#overall-total").inner_text(),
-                             "NT$2,318,560.2")
+                             "NT$2,322,060.2")
             note = page.locator("details.quote-intro")
             self.assertEqual(note.count(), 1)
             self.assertIsNone(note.get_attribute("open"))
@@ -1444,6 +1498,7 @@ class PagesPreviewTests(unittest.TestCase):
                 try {
                     await globalThis.__RENOVATION_OFFLINE_STORE__.update({
                         ...invalid,expectedRevision:source.revision,undo:null,
+                        controlRelationsVersion:1,doorAllocationVersion:1,
                     });
                 } catch (error) {
                     invalidStateRejected = /室外|窗位|產品/.test(error.message);
@@ -1484,7 +1539,7 @@ class PagesPreviewTests(unittest.TestCase):
                     windowGuard,lengthGuard,invalidStateRejected,
                     csvColumns:['冷氣規劃狀態','冷氣施工費（未核）',
                         '單條燈軌長度（cm）'].every(text => csv.includes(text)),
-                    roundTrip:exported.items.length === 180 &&
+                    roundTrip:exported.items.length === 181 &&
                         exported.products.length === 28 &&
                         exported.items.find(item => item.id === 'kitchen-plan-dishwasher')
                             .installationUnitPrice === null,
@@ -1493,7 +1548,7 @@ class PagesPreviewTests(unittest.TestCase):
             }""")
             self.assertEqual((report["quote"], report["total"],
                               report["railAmount"], report["acAmount"]),
-                             (1_959_530, 2_318_560.2, 4_684, 140_088))
+                             (1_959_530, 2_322_060.2, 4_684, 140_088))
             self.assertEqual((report["addedProducts"], report["linked"],
                               report["railLength"], report["railHeads"],
                               report["originalLength"]), (10, 0, 300, 4, 150))
@@ -1590,6 +1645,7 @@ class PagesPreviewTests(unittest.TestCase):
                 }
                 const saved = await globalThis.__RENOVATION_OFFLINE_STORE__.update({
                     ...changed,expectedRevision:source.revision,undo:null,
+                    controlRelationsVersion:1,doorAllocationVersion:1,
                 });
                 const root = new URL('../extensions/renovation-equipment/assets/',
                     location.href);
@@ -1632,7 +1688,7 @@ class PagesPreviewTests(unittest.TestCase):
                 "installation": 0, "included": True,
             })
             self.assertEqual(report["vanities"], [[60, 47], [60, 47]])
-            self.assertEqual(report["counts"], [180, 28])
+            self.assertEqual(report["counts"], [181, 28])
             self.assertEqual(report["delta"], 0)
             self.assertTrue(report["candidateOnly"])
             self.assertEqual(report["originalQuoteTWD"], 1_959_530)
@@ -1737,6 +1793,7 @@ class PagesPreviewTests(unittest.TestCase):
                     product.id && linkedProductMismatch(repriced,item));
                 const changed = await globalThis.__RENOVATION_OFFLINE_STORE__.update({
                     ...updated,expectedRevision:source.revision,undo:null,
+                    controlRelationsVersion:1,doorAllocationVersion:1,
                 });
                 const budgetAfter = calculatePlanTotal(calculateBudget(changed.items,
                     {wholePlan:true})).TWD;
@@ -1746,7 +1803,8 @@ class PagesPreviewTests(unittest.TestCase):
                 let extraRejected = false;
                 try {
                     await globalThis.__RENOVATION_OFFLINE_STORE__.update({
-                        ...invalid,expectedRevision:changed.revision,undo:null});
+                        ...invalid,expectedRevision:changed.revision,undo:null,
+                        controlRelationsVersion:1,doorAllocationVersion:1});
                 } catch (error) {
                     extraRejected = /衛浴器具安裝費須為 0/.test(error.message);
                 }
@@ -1757,7 +1815,8 @@ class PagesPreviewTests(unittest.TestCase):
                 let specialRejected = false;
                 try {
                     await globalThis.__RENOVATION_OFFLINE_STORE__.update({
-                        ...invalid,expectedRevision:changed.revision,undo:null});
+                        ...invalid,expectedRevision:changed.revision,undo:null,
+                        controlRelationsVersion:1,doorAllocationVersion:1});
                 } catch (error) {
                     specialRejected = /只有燈具或原報已含/.test(error.message);
                 }
@@ -1774,7 +1833,7 @@ class PagesPreviewTests(unittest.TestCase):
                         'bath-main-toilet'),
                     extraRejected,specialRejected,
                     stillSaved:JSON.parse(localStorage.getItem(
-                        'renovation-equipment-offline-controls-v1:' + location.pathname))
+                        'renovation-equipment-offline-doors-v1:' + location.pathname))
                         .items.find(item => item.id ===
                             'bath-main-heated-towel-rail').installationUnitPrice,
                 };
@@ -1788,7 +1847,7 @@ class PagesPreviewTests(unittest.TestCase):
             self.assertTrue(all(item["install"] == 0 for item in report["covered"]))
             self.assertFalse(report["mismatch"])
             self.assertGreaterEqual(report["linkedToilets"], 1)
-            self.assertEqual(report["before"], 2_318_560.2)
+            self.assertEqual(report["before"], 2_322_060.2)
             self.assertEqual(report["after"] - report["before"],
                              100 * report["linkedToilets"])
             self.assertEqual(report["repricedToilet"]["installationUnitPrice"], 0)
@@ -1813,7 +1872,7 @@ class PagesPreviewTests(unittest.TestCase):
             )
             page.locator("#load-file-input").set_input_files(str(SAMPLE))
             page.wait_for_function(
-                "document.querySelector('#overall-total').textContent.includes('2,318,560')",
+                "document.querySelector('#overall-total').textContent.includes('2,322,060')",
                 timeout=15000,
             )
             with page.expect_download() as downloaded:
@@ -1869,7 +1928,7 @@ class PagesPreviewTests(unittest.TestCase):
                 Path(downloaded.value.path()).read_text(encoding="utf-8")
             )["state"]
             self.assertEqual((len(state["items"]), len(state["products"]),
-                              state["undo"]), (180, 28, None))
+                              state["undo"]), (181, 28, None))
             lamp = next(product for product in state["products"] if product["id"] ==
                         "catalog-ceiling-trplus-026036388")
             self.assertEqual((lamp["unitPrice"], lamp["lightWatts"],
@@ -2026,13 +2085,263 @@ class PagesPreviewTests(unittest.TestCase):
                              stored["items"] if item["id"] == "bath-main-toilet"))
             self.assertEqual(stored["revision"], 7)
             copied = json.loads(page.evaluate(
-                "localStorage.getItem('renovation-equipment-offline-controls-v1:' + location.pathname)"
+                "localStorage.getItem('renovation-equipment-offline-doors-v1:' + location.pathname)"
             ))
             self.assertEqual(copied["revision"], 7)
+            self.assertIsNone(page.evaluate(
+                "localStorage.getItem('renovation-equipment-offline-controls-v1:' + location.pathname)"
+            ))
             self.assertEqual(copied["items"], state["items"])
             self.assertEqual(copied["rooms"], state["rooms"])
         finally:
             context.close()
+
+    def test_public_door_allocation_keeps_three_bath_doors_and_quoted_rails(self):
+        context = self.browser.new_context(accept_downloads=True)
+        try:
+            page = context.new_page()
+            errors = []
+            page.on("pageerror", lambda error: errors.append(str(error)))
+            self.open_demo(page)
+            original = page.evaluate("globalThis.__RENOVATION_OFFLINE_STORE__.read()")
+            self.assertEqual((len(original["items"]), original["revision"],
+                              original["undo"]), (181, 0, None))
+            self.assertEqual(page.locator("#quote-baseline").inner_text(),
+                             "NT$1,959,530")
+            self.assertEqual(page.locator("#overall-total").inner_text(),
+                             "NT$2,322,060.2")
+            for door_id, kind in (
+                ("main-bath-master", "swing"),
+                ("main-bath-hall", "swing"),
+                ("main-shower", "swing"),
+                ("bedroom-2", "slide"),
+                ("bedroom-3-studio", "slide"),
+            ):
+                self.assertIn(kind, page.locator(
+                    f'.overview-svg [data-plan-door-id="{door_id}"]'
+                ).get_attribute("class").split())
+            self.assertEqual(page.locator(
+                '.overview-svg [data-plan-door-id="balcony"] .door-pending-label'
+            ).text_content(), "未計算")
+            self.assertIn("未計算", page.locator(
+                '.overview-svg [data-plan-door-id="balcony"]'
+            ).get_attribute("aria-label"))
+
+            page.locator(
+                '.overview-svg .plan-zone[data-select-room="bath-main"]'
+            ).click()
+            bath = page.locator('.door-choices[data-room-id="bath-main"]')
+            bath.locator("summary").click()
+            self.assertEqual(bath.locator(".door-choice").count(), 3)
+            self.assertEqual(bath.locator(".track-controls").count(), 0)
+            for door_id, material, price in (
+                ("door-main-bath-master", "solid-wood", "14000"),
+                ("door-main-bath-hall", "bathroom", "8500"),
+                ("door-main-shower", "shower-glass", "0"),
+            ):
+                self.assertEqual(bath.locator(
+                    f'[data-item-id="{door_id}"][data-field="doorMaterial"]'
+                ).input_value(), material)
+                self.assertEqual(bath.locator(
+                    f'[data-item-id="{door_id}"][data-field="unitPrice"]'
+                ).input_value(), price)
+            self.assertEqual(bath.locator(
+                '[data-item-id="door-main-bath-hall"][data-field="doorOpeningKind"]'
+            ).input_value(), "swing")
+            self.assertIn("已各在設備明細列入原報價", bath.inner_text())
+
+            page.locator('[data-plan-room-select]').select_option("bedroom-2")
+            bedroom = page.locator('.door-choices[data-room-id="bedroom-2"]')
+            bedroom.locator("summary").click()
+            self.assertEqual(bedroom.locator(
+                '[data-item-id="track-main-bath-hall"][data-field="quantity"]'
+            ).input_value(), "0.8")
+            self.assertIn("原主浴額度暫移", bedroom.inner_text())
+            self.assertIn("可能重複", bedroom.inner_text())
+            page.locator('[data-plan-room-select]').select_option("studio")
+            studio = page.locator('.door-choices[data-room-id="studio"]')
+            studio.locator("summary").click()
+            self.assertEqual(studio.locator(
+                '[data-item-id="track-bedroom-3-studio"][data-field="quantity"]'
+            ).input_value(), "0.8")
+            self.assertIn("臥室3－工作室木纖滑門", studio.inner_text())
+            self.assertIn("未計算，非免費", studio.inner_text())
+            page.set_viewport_size({"width": 390, "height": 844})
+            self.assertLessEqual(studio.bounding_box()["width"], 390)
+
+            with page.expect_download() as download:
+                page.locator("#export-items").click()
+            rows = list(csv.DictReader(StringIO(
+                Path(download.value.path()).read_text(encoding="utf-8-sig")
+            )))
+            doors = {row["門位ID"]: row for row in rows if row["門位ID"]}
+            tracks = {row["軌道對應門位"]: row for row in rows
+                      if row["軌道對應門位"]}
+            self.assertEqual(doors["balcony"]["商品單價"], "未計算")
+            self.assertEqual(doors["balcony"]["原報價已含"], "否")
+            self.assertIn("已轉至臥室3", doors["balcony"]["歷史報價與歸屬說明"])
+            self.assertEqual(doors["bedroom-3-studio"]["商品單價"], "19000")
+            self.assertEqual(doors["bedroom-3-studio"]["原報價已含"], "是")
+            self.assertEqual(set(tracks), {"bedroom-2", "bedroom-3-studio"})
+            for row in tracks.values():
+                self.assertEqual(row["數量"], "0.8")
+                self.assertEqual(row["原報價基準（新台幣）"], "1440")
+                self.assertIn("主浴.工作室", row["歷史報價與歸屬說明"])
+
+            with page.expect_download() as download:
+                page.locator("#save-file").click()
+            exported = json.loads(Path(
+                download.value.path()).read_text(encoding="utf-8"))
+            self.assertEqual(exported["formatVersion"], 7)
+            self.assertEqual(exported["state"]["items"], original["items"])
+            self.assertIsNone(exported["state"]["undo"])
+            page.locator('[data-plan-room-select]').select_option("bath-main")
+            bath = page.locator('.door-choices[data-room-id="bath-main"]')
+            if bath.get_attribute("open") is None:
+                bath.locator("summary").click()
+            bath.locator(
+                '[data-item-id="door-main-bath-master"][data-field="doorMaterial"]'
+            ).select_option("wood-fiber")
+            page.locator("#save-now").click()
+            page.wait_for_function("""async () => {
+                const state = await globalThis.__RENOVATION_OFFLINE_STORE__.read();
+                return state.revision === 1 && state.items.find(item =>
+                    item.id === 'door-main-bath-master').unitPrice === 10500;
+            }""", timeout=15000)
+            changed = page.evaluate("globalThis.__RENOVATION_OFFLINE_STORE__.read()")
+            self.assertEqual(changed["undo"]["items"], original["items"])
+            self.assertEqual(page.locator("#overall-total").inner_text(),
+                             "NT$2,318,560.2")
+            page.locator("#undo-last").click()
+            page.wait_for_function("""async () => {
+                const state = await globalThis.__RENOVATION_OFFLINE_STORE__.read();
+                return state.undo === null && state.items.find(item =>
+                    item.id === 'door-main-bath-master').unitPrice === 14000;
+            }""", timeout=15000)
+            self.assertEqual(page.locator("#overall-total").inner_text(),
+                             "NT$2,322,060.2")
+            self.assertEqual(errors, [])
+        finally:
+            context.close()
+
+    def test_offline_edge_old_control_save_keeps_original_doors(self):
+        if not EDGE:
+            self.skipTest("Microsoft Edge is not installed")
+        browser = self.playwright.chromium.launch(
+            executable_path=EDGE, headless=True
+        )
+        try:
+            current_context = browser.new_context(
+                viewport={"width": 390, "height": 844}
+            )
+            try:
+                current_page = current_context.new_page()
+                current_page.on("dialog", lambda dialog: dialog.accept())
+                remote = []
+                current_page.on("request", lambda request: remote.append(request.url)
+                                if request.url.startswith(("http:", "https:")) else None)
+                current_page.goto(PORTABLE.as_uri())
+                current_page.wait_for_function(
+                    "Boolean(globalThis.__RENOVATION_OFFLINE_STORE__)",
+                    timeout=15000,
+                )
+                current_page.locator("#load-file-input").set_input_files(str(SAMPLE))
+                current_page.wait_for_function(
+                    "document.querySelector('#overall-total').textContent.includes('2,322,060')",
+                    timeout=15000,
+                )
+                self.assertEqual(current_page.locator(
+                    '.overview-svg [data-plan-door-id="balcony"] .door-pending-label'
+                ).text_content(), "未計算")
+                current_page.locator(
+                    '.overview-svg .plan-zone[data-select-room="bath-main"]'
+                ).click()
+                self.assertEqual(current_page.locator(
+                    '.door-choices[data-room-id="bath-main"] .door-choice'
+                ).count(), 3)
+                self.assertLessEqual(current_page.locator(
+                    '.door-choices[data-room-id="bath-main"]'
+                ).bounding_box()["width"], 390)
+                self.assertEqual(remote, [])
+            finally:
+                current_context.close()
+
+            previous = previous_public_door_save()
+            previous["revision"] = 7
+            next(item for item in previous["items"] if item["id"] ==
+                 "quoted-switch-01")["controlledLightIds"] = [
+                     "living-ceiling-light-01"
+                 ]
+            older = previous_public_balcony_save()
+            older["revision"] = 9
+            context = browser.new_context(accept_downloads=True)
+            try:
+                context.add_init_script("""if (location.pathname.includes('/portable/')) {
+                    localStorage.setItem(
+                        'renovation-equipment-offline-controls-v1:' + location.pathname,
+                        %s);
+                    localStorage.setItem(
+                        'renovation-equipment-offline-v1:' + location.pathname,
+                        %s);
+                }""" % (
+                    json.dumps(json.dumps(previous, ensure_ascii=False)),
+                    json.dumps(json.dumps(older, ensure_ascii=False)),
+                ))
+                page = context.new_page()
+                requests = []
+                errors = []
+                page.on("request", lambda request: requests.append(request.url)
+                        if request.url.startswith(("http:", "https:")) else None)
+                page.on("pageerror", lambda error: errors.append(str(error)))
+                page.goto(PORTABLE.as_uri())
+                page.wait_for_function(
+                    "Boolean(globalThis.__RENOVATION_OFFLINE_STORE__)",
+                    timeout=15000,
+                )
+                page.wait_for_function("""async () => {
+                    const state = await globalThis.__RENOVATION_OFFLINE_STORE__.read();
+                    return state?.revision === 7 && state.items.length === 180;
+                }""", timeout=15000)
+                saved = page.evaluate("globalThis.__RENOVATION_OFFLINE_STORE__.read()")
+                by_id = {item["id"]: item for item in saved["items"]}
+                self.assertEqual(by_id["door-balcony"]["unitPrice"], 19000)
+                self.assertEqual(by_id["door-main-bath-master"]["unitPrice"], 10500)
+                self.assertEqual(by_id["door-main-bath-hall"]["doorOpeningKind"],
+                                 "slide")
+                self.assertNotIn("door-bedroom-3-studio", by_id)
+                self.assertEqual(by_id["track-main-bath-hall"]["roomId"],
+                                 "bath-main")
+                self.assertEqual(by_id["quoted-switch-01"]["controlledLightIds"],
+                                 ["living-ceiling-light-01"])
+                self.assertEqual(page.locator("#overall-total").inner_text(),
+                                 "NT$2,318,560.2")
+                self.assertEqual(page.locator(
+                    '.overview-svg [data-plan-door-id="balcony"] .door-pending-label'
+                ).count(), 0)
+                self.assertIn("slide", page.locator(
+                    '.overview-svg [data-plan-door-id="main-bath-hall"]'
+                ).get_attribute("class").split())
+                copied = json.loads(page.evaluate(
+                    "localStorage.getItem('renovation-equipment-offline-doors-v1:' + location.pathname)"
+                ))
+                self.assertEqual(copied["items"], saved["items"])
+                page.get_by_role("tab", name="燈具配置圖", exact=True).click()
+                self.assertEqual(page.locator("[data-control-light-id]").count(), 1)
+                self.assertEqual(page.evaluate(
+                    "globalThis.__RENOVATION_OFFLINE_STORE__.read()"
+                ), saved)
+                with page.expect_download() as download:
+                    page.locator("#save-file").click()
+                exported = json.loads(Path(
+                    download.value.path()).read_text(encoding="utf-8"))
+                self.assertEqual(exported["formatVersion"], 6)
+                self.assertEqual(exported["state"]["items"], saved["items"])
+                self.assertEqual(requests, [])
+                self.assertEqual(errors, [])
+            finally:
+                context.close()
+        finally:
+            browser.close()
 
     def test_saved_unselected_laundry_stays_generic_not_a_fake_gas_selection(self):
         old = previous_public_balcony_save()
@@ -2079,7 +2388,7 @@ class PagesPreviewTests(unittest.TestCase):
             )
             page.locator("#load-file-input").set_input_files(str(SAMPLE))
             page.wait_for_function(
-                "document.querySelector('#overall-total').textContent.includes('2,318,560')",
+                "document.querySelector('#overall-total').textContent.includes('2,322,060')",
                 timeout=15000,
             )
             with page.expect_download() as download:
@@ -2096,7 +2405,7 @@ class PagesPreviewTests(unittest.TestCase):
             saved = json.loads(Path(download.value.path()).read_text(encoding="utf-8"))
             self.assertEqual((saved["formatVersion"], len(saved["state"]["items"]),
                               len(saved["state"]["products"]), saved["state"]["undo"]),
-                             (5, 180, 28, None))
+                             (7, 181, 28, None))
             page.locator('.overview-svg .plan-zone[data-select-room="kitchen"]').click()
             self.assertEqual(page.locator(
                 '.room-svg [data-marker-id^="kitchen-plan-"]').count(), 12)
@@ -2116,9 +2425,9 @@ class PagesPreviewTests(unittest.TestCase):
             page.wait_for_function("""async () => {
                 const state = await globalThis.__RENOVATION_OFFLINE_STORE__.read();
                 return state.rooms.find(room => room.id === 'kitchen').ceilingHeightCm ===
-                    null && state.items.length === 180;
+                    null && state.items.length === 181;
             }""", timeout=15000)
-            self.assertEqual(page.locator("#overall-total").inner_text(), "NT$2,318,560.2")
+            self.assertEqual(page.locator("#overall-total").inner_text(), "NT$2,322,060.2")
         finally:
             context.close()
 
@@ -2147,12 +2456,12 @@ class PagesPreviewTests(unittest.TestCase):
             gas = next(item for item in rotated["items"] if item["id"] ==
                        "kitchen-plan-gas")
             self.assertIsNone(gas["unitPrice"])
-            self.assertEqual(page.locator("#overall-total").inner_text(), "NT$2,318,560.2")
+            self.assertEqual(page.locator("#overall-total").inner_text(), "NT$2,322,060.2")
             page.locator("#undo-last").click()
             page.wait_for_function("""async () => {
                 const state = await globalThis.__RENOVATION_OFFLINE_STORE__.read();
                 return state.items.find(item => item.id === 'kitchen-plan-gas')
-                    .orientation === 0 && state.items.length === 180;
+                    .orientation === 0 && state.items.length === 181;
             }""", timeout=15000)
 
             select = page.locator("[data-plan-item-select]")
@@ -2186,7 +2495,7 @@ class PagesPreviewTests(unittest.TestCase):
             page.locator("#save-now").click()
             page.wait_for_function("""original => {
                 const saved = localStorage.getItem(
-                    'renovation-equipment-offline-controls-v1:' + location.pathname);
+                    'renovation-equipment-offline-doors-v1:' + location.pathname);
                 if (!saved) return false;
                 const moved = JSON.parse(saved).items.find(item =>
                     item.id === 'kitchen-plan-ih').placement;
@@ -2200,7 +2509,7 @@ class PagesPreviewTests(unittest.TestCase):
                 return Math.abs(restored.x-original.x) +
                     Math.abs(restored.y-original.y) < .000001;
             }""", arg=original, timeout=15000)
-            self.assertEqual(page.locator("#overall-total").inner_text(), "NT$2,318,560.2")
+            self.assertEqual(page.locator("#overall-total").inner_text(), "NT$2,322,060.2")
         finally:
             context.close()
 
@@ -2271,7 +2580,7 @@ class PagesPreviewTests(unittest.TestCase):
                 const state = await globalThis.__RENOVATION_OFFLINE_STORE__.read();
                 state.rooms.find(room => room.id === 'bedroom-1').ceilingHeightCm = 240;
                 localStorage.setItem(
-                    'renovation-equipment-offline-controls-v1:' + location.pathname,
+                    'renovation-equipment-offline-doors-v1:' + location.pathname,
                     JSON.stringify(state));
             }""")
             page.locator('.overview-svg .plan-zone[data-select-room="bedroom-1"]').click()
@@ -2285,7 +2594,7 @@ class PagesPreviewTests(unittest.TestCase):
                 timeout=15000,
             )
             saved = json.loads(page.evaluate(
-                "localStorage.getItem('renovation-equipment-offline-controls-v1:' + location.pathname)"
+                "localStorage.getItem('renovation-equipment-offline-doors-v1:' + location.pathname)"
             ))
             self.assertEqual(saved["rooms"][3]["ceilingHeightCm"], 240)
         finally:

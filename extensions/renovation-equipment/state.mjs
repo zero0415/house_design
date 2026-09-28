@@ -5,6 +5,9 @@ import { FURNITURE_TEMPLATES } from "./assets/furniture.js";
 import {
     guardControlRelationsUpdate, validateControlRelations,
 } from "./assets/circuit-preview.js";
+import {
+    allocatedTrackDefinition, guardDoorAllocationUpdate, validateDoorAllocation,
+} from "./assets/door-allocation.js";
 import { ROOM_DRAWING_DIMENSIONS } from "./assets/house-geometry.js";
 import { DOOR_OPTIONS } from "./assets/door-options.js";
 import { QUOTED_SLIDE_TRACKS, SLIDE_TRACK_RATE_TWD } from "./assets/slide-tracks.js";
@@ -915,7 +918,8 @@ export function validateState(data) {
         const doorMaterial = kind === "door" ? requiredText(item.doorMaterial, "門片材質", 40) : null;
         const doorOpeningKind = kind === "door"
             ? requiredText(item.doorOpeningKind, "開門方式", 10) : null;
-        if (kind === "door" && (!QUOTED_DOORS.some(([id]) => id === doorId) ||
+        if (kind === "door" && (!(QUOTED_DOORS.some(([id]) => id === doorId) ||
+                doorId === "bedroom-3-studio") ||
             !Object.hasOwn(DOOR_OPTIONS, doorMaterial) ||
             ((doorId === "main-shower" || doorId === "guest-shower")
                 ? !["shower-glass", "custom"].includes(doorMaterial)
@@ -939,7 +943,7 @@ export function validateState(data) {
         const legacyFanInstall = id.endsWith("-heater-install") &&
             item.name === "暖風機安裝" &&
             item.brandModel === "暖風機安裝（機器自備）";
-        const quotedTrack = QUOTED_TRACK_BY_ID.get(id);
+        const quotedTrack = allocatedTrackDefinition(item, QUOTED_TRACK_BY_ID.get(id));
         const quotedPartition = id === BEDROOM2_PARTITION_ID;
         const quotedSwitch = QUOTED_SWITCH_BY_ID.get(id);
         const quotedOutlet = QUOTED_OUTLET_BY_ID.get(id);
@@ -1060,7 +1064,7 @@ export function validateState(data) {
             item.placement != null || item.orientation != null || item.widthCm != null ||
             item.depthCm != null || item.heightCm != null || item.name !== quotedTrack.name ||
             item.unit !== "米" || item.brandModel !== "滑門軌道（型式待確認）")) {
-            throw new StoreError(400, "原報價滑門軌道須對應主浴或臥室3－工作室拉門，不可作一般設備。");
+            throw new StoreError(400, "原報價滑門軌道的門位／房間須符合歷史或完整重歸屬方案，不可作一般設備。");
         }
         if (!quotedTrack && item.trackDoorId != null) {
             throw new StoreError(400, "未列原報價的物件不可指定已報價軌道門位。");
@@ -1371,6 +1375,9 @@ export function validateState(data) {
             ),
             heightCm: optionalDimension(item.heightCm, "門洞淨高"),
             doorId,
+            ...(Object.hasOwn(item, "doorQuoteAllocation") ? {
+                doorQuoteAllocation: item.doorQuoteAllocation,
+            } : {}),
             doorMaterial,
             doorOpeningKind,
             trackDoorId: quotedTrack?.doorId ?? null,
@@ -1412,6 +1419,7 @@ export function validateState(data) {
     });
     try {
         validateControlRelations(items);
+        validateDoorAllocation(items);
     } catch (error) {
         if (!(error instanceof TypeError || error instanceof RangeError)) throw error;
         throw new StoreError(400, error.message);
@@ -1437,7 +1445,7 @@ export function validateState(data) {
     if (quotedTrackIds.some((id) => itemIds.has(id)) &&
         (!quotedTrackIds.every((id) => itemIds.has(id)) ||
             !items.some((item) => item.kind === "door" && item.doorId === "main-bath-hall"))) {
-        throw new StoreError(400, "原報價 1.6 米滑門軌道須由主浴與臥室3－工作室兩道拉門各列 0.8 米。");
+        throw new StoreError(400, "原報價 1.6 米滑門軌道須保留完整兩筆及相應門位；歷史與屋主暫配歸屬不得混用。");
     }
     const switchIds = QUOTED_SWITCHES.map((item) => item.id);
     if (switchIds.some((id) => itemIds.has(id)) && !switchIds.every((id) => itemIds.has(id))) {
@@ -1551,6 +1559,7 @@ export function createStore(filePath) {
             }
             try {
                 guardControlRelationsUpdate(current, candidate);
+                guardDoorAllocationUpdate(current, candidate);
             } catch (error) {
                 if (!(error instanceof TypeError)) throw error;
                 throw new StoreError(400, error.message);

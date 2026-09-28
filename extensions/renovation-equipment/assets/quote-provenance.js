@@ -1,5 +1,8 @@
 import { isQuotedEquipment } from "./budget.js";
 import { DOOR_OPTIONS } from "./door-options.js";
+import {
+    DOOR_TRACK_CAUTION, isAllocatedDoorItem, isUnquotedBalconyDoor,
+} from "./door-allocation.js";
 import { QUOTED_SLIDE_TRACKS, SLIDE_TRACK_RATE_TWD } from "./slide-tracks.js";
 import {
     BEDROOM2_PARTITION_ID, BEDROOM2_PARTITION_OPTIONS, BEDROOM2_PARTITION_QUOTED_AREA,
@@ -79,6 +82,15 @@ const equipmentSourceKeys = new Map([
 
 export function quoteProvenance(item) {
     if (item?.kind === "door") {
+        if (isUnquotedBalconyDoor(item)) {
+            return "陽台門未計算，非免費；原誤配的工作室木纖滑門19,000元額度已轉至臥室3↔工作室，未另增門片費。\n" +
+                ORIGINAL_QUOTE_SOURCES.woodSlide;
+        }
+        if (isAllocatedDoorItem(item) && item.doorId === "bedroom-3-studio") {
+            return ORIGINAL_QUOTE_SOURCES.woodSlide +
+                "\n屋主指定原工作室額度由陽台轉至此門位，並非第三組追加門片。\n" +
+                DOOR_TRACK_CAUTION;
+        }
         if (["main-shower", "guest-shower"].includes(item.doorId)) {
             return `${ORIGINAL_QUOTE_SOURCES.glass}\n${ORIGINAL_QUOTE_SOURCES.film}` +
                 "\n此筆僅玻璃門位，費用已分列同房設備，不另計門片。";
@@ -86,6 +98,9 @@ export function quoteProvenance(item) {
         const key = doorSourceKeys.get(item.doorId);
         if (key) return ORIGINAL_QUOTE_SOURCES[key];
     } else if (isQuotedEquipment(item)) {
+        if (isAllocatedDoorItem(item)) {
+            return ORIGINAL_QUOTE_SOURCES.slideTrack + "\n" + DOOR_TRACK_CAUTION;
+        }
         const key = isQuotedOutlet(item) ? "sockets" : isQuotedCircuit(item) ? "circuits" :
             equipmentSourceKeys.get(item.id);
         if (key) return ORIGINAL_QUOTE_SOURCES[key];
