@@ -15,7 +15,7 @@ const OLD_HALL_NOTE = OLD_DOOR_NOTE +
     " 新配置確認通客餐廳為拉門；目前單價仍沿用原塑鋼廁所門報價基準，" +
     "拉門滑軌與施工價差須請廠商重報，未自動計入追加。";
 
-function assertReviewedPublicState(state) {
+export function assertReviewedPublicState(state) {
     const normalized = validateState(state);
     const expected = structuredClone(state);
     for (const [actual, reviewed] of [
@@ -32,7 +32,7 @@ function assertReviewedPublicState(state) {
     }
     if (!isDeepStrictEqual(normalized, expected)) {
         throw new TypeError(
-            "門片歸屬須使用完整且已核對的公開 v5 資料，不能重設其他屋主欄位。"
+            "遷移須使用完整且已核對的公開 v5 資料，不能重設其他屋主欄位。"
         );
     }
 }

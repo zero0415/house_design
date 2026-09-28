@@ -32,7 +32,7 @@ other_switch = "quoted-switch-02"
 track_id = "corridor-track-lighting"
 light_id = "living-ceiling-light-01"
 assert (len(source["items"]), len(source["products"]), source["revision"],
-        source["undo"]) == (181, 28, 0, None)
+        source["undo"]) == (182, 28, 0, None)
 
 server_script = r"""
 import { createServer } from 'node:http';
@@ -140,7 +140,10 @@ with tempfile.TemporaryDirectory(prefix="public-control-relations-") as director
                 expect(page.locator("[data-control-light-id]")).to_have_count(0)
                 expect(page.locator("[data-control-summary]")).to_contain_text(
                     "尚未設定對應 14")
-                expect(page.locator("[data-sheet-context]")).to_have_count(3)
+                expect(page.locator("[data-sheet-context]")).to_have_count(4)
+                expect(page.locator(
+                    '[data-sheet-context="living-auto-water-robot"]'
+                )).to_have_count(1)
                 page.locator("#control-switch").select_option(switch_id)
                 page.locator(
                     f'input[name="controlledLightIds"][value="{track_id}"]'
@@ -203,7 +206,7 @@ with tempfile.TemporaryDirectory(prefix="public-control-relations-") as director
                     page.locator("#save-file").click()
                 download.value.save_as(str(export_path))
                 exported = json.loads(export_path.read_text(encoding="utf-8"))
-                assert exported["formatVersion"] == 7
+                assert exported["formatVersion"] == 8
                 assert snapshot(exported["state"]) == snapshot(second)
                 page.reload()
                 expect(page.locator(".overview-svg")).to_be_visible()
@@ -277,13 +280,16 @@ with tempfile.TemporaryDirectory(prefix="public-control-relations-") as director
             keys = page.evaluate("""() => ({
                 old:'renovation-equipment-offline-v1:' + location.pathname,
                 controls:'renovation-equipment-offline-controls-v1:' + location.pathname,
-                next:'renovation-equipment-offline-doors-v1:' + location.pathname,
+                doors:'renovation-equipment-offline-doors-v1:' + location.pathname,
+                next:'renovation-equipment-offline-robot-v1:' + location.pathname,
             })""")
             assert page.evaluate(
                 "key => JSON.parse(localStorage.getItem(key))",
                 keys["old"]) == previous
             assert page.evaluate(
                 "key => localStorage.getItem(key)", keys["controls"]) is None
+            assert page.evaluate(
+                "key => localStorage.getItem(key)", keys["doors"]) is None
             copied = page.evaluate(
                 "key => JSON.parse(localStorage.getItem(key))", keys["next"])
             assert snapshot(copied) == snapshot(previous)
@@ -346,14 +352,14 @@ with tempfile.TemporaryDirectory(prefix="public-control-relations-") as director
             expect(page.locator("[data-control-light-id]")).to_have_count(1)
             control_key = page.evaluate(
                 "'renovation-equipment-offline-controls-v1:' + location.pathname")
-            door_key = page.evaluate(
-                "'renovation-equipment-offline-doors-v1:' + location.pathname")
+            robot_key = page.evaluate(
+                "'renovation-equipment-offline-robot-v1:' + location.pathname")
             assert page.evaluate(
                 "key => JSON.parse(localStorage.getItem(key))",
                 control_key) == controls_save
             assert snapshot(page.evaluate(
                 "key => JSON.parse(localStorage.getItem(key))",
-                door_key)) == snapshot(controls_save)
+                robot_key)) == snapshot(controls_save)
             page.evaluate(
                 "({key,state}) => localStorage.setItem(key,JSON.stringify(state))",
                 {"key": control_key, "state": old_rollback},
@@ -361,8 +367,64 @@ with tempfile.TemporaryDirectory(prefix="public-control-relations-") as director
             page.reload()
             expect(page.locator(".overview-svg")).to_be_visible()
             assert snapshot(read(page, "offline")) == snapshot(controls_save), (
-                "Existing doors cache must outrank the older controls cache"
+                "Existing robot cache must outrank the older controls cache"
             )
+            context.close()
+
+            context = browser.new_context(accept_downloads=True)
+            doors_save = deepcopy(normalized_source)
+            doors_save["items"] = [entry for entry in doors_save["items"]
+                                   if entry["id"] != "living-auto-water-robot"]
+            doors_save["revision"] = 712
+            older_controls = deepcopy(doors_save)
+            older_controls["revision"] = 713
+            next(entry for entry in older_controls["items"] if entry["id"] ==
+                 switch_id)["controlledLightIds"] = [light_id]
+            older_legacy = deepcopy(doors_save)
+            older_legacy["revision"] = 714
+            context.add_init_script(script=f"""
+                if (location.protocol === 'file:' &&
+                    !localStorage.getItem('test-door-priority-seeded')) {{
+                    localStorage.setItem(
+                        'renovation-equipment-offline-doors-v1:' + location.pathname,
+                        JSON.stringify({json.dumps(doors_save, ensure_ascii=False)}));
+                    localStorage.setItem(
+                        'renovation-equipment-offline-controls-v1:' + location.pathname,
+                        JSON.stringify({json.dumps(older_controls, ensure_ascii=False)}));
+                    localStorage.setItem(
+                        'renovation-equipment-offline-v1:' + location.pathname,
+                        JSON.stringify({json.dumps(older_legacy, ensure_ascii=False)}));
+                    localStorage.setItem('test-door-priority-seeded', '1');
+                }}
+            """)
+            page = context.new_page()
+            page.goto(portable)
+            expect(page.locator(".overview-svg")).to_be_visible()
+            saved_door_plan = read(page, "offline")
+            assert saved_door_plan["revision"] == 712
+            assert len(saved_door_plan["items"]) == 181
+            assert not any(entry["id"] == "living-auto-water-robot"
+                           for entry in saved_door_plan["items"])
+            expect(page.locator("[data-robot-legend]")).to_have_count(0)
+            copied = page.evaluate(
+                "key => JSON.parse(localStorage.getItem(key))",
+                page.evaluate(
+                    "'renovation-equipment-offline-robot-v1:' + location.pathname"))
+            assert snapshot(copied) == snapshot(saved_door_plan)
+            with page.expect_download() as download:
+                page.locator("#save-file").click()
+            assert json.loads(Path(download.value.path()).read_text(
+                encoding="utf-8"))["formatVersion"] == 7
+            page.evaluate("""() => {
+                const key = 'renovation-equipment-offline-doors-v1:' +
+                    location.pathname;
+                const edited = JSON.parse(localStorage.getItem(key));
+                edited.revision = 888;
+                localStorage.setItem(key, JSON.stringify(edited));
+            }""")
+            page.reload()
+            expect(page.locator(".overview-svg")).to_be_visible()
+            assert read(page, "offline")["revision"] == 712
             context.close()
             browser.close()
     finally:
@@ -371,4 +433,4 @@ with tempfile.TemporaryDirectory(prefix="public-control-relations-") as director
 
 assert source_path.read_bytes() == raw
 print("PASS: isolated HTTP and offline Edge explicit controls, "
-      "Undo, export, no remote requests, protected legacy cache")
+      "Undo, export, no remote requests, robot/doors/controls cache priority")

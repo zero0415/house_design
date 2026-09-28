@@ -9,6 +9,7 @@ import {
 } from "../extensions/renovation-equipment/assets/floorplan.js";
 import { HOUSE_ZONES } from "../extensions/renovation-equipment/assets/house-geometry.js";
 import { summarize, validateState } from "../extensions/renovation-equipment/state.mjs";
+import { ROBOT_ID } from "../extensions/renovation-equipment/assets/robot-plan.js";
 
 const path = new URL("../files/設備規劃.json", import.meta.url);
 const raw = await readFile(path, "utf8");
@@ -49,7 +50,7 @@ test("exact saved R/B/C endpoints appear once, not duplicated by circuits", () =
 test("both sheets draw saved laundry positions and ghost only the tagged historical sink", () => {
     const previous = structuredClone(state);
     previous.items = previous.items.filter((item) =>
-        item.id !== "balcony-outboard-sink");
+        item.id !== "balcony-outboard-sink" && item.id !== ROBOT_ID);
     const oldDryer = previous.items.find((item) =>
         item.id === "balcony-dryer");
     oldDryer.roomId = "ac-platform";
@@ -59,6 +60,9 @@ test("both sheets draw saved laundry positions and ghost only the tagged histori
     for (const view of ["outlet-sheet", "lighting-sheet"]) {
         const current = renderElectricalSheet(state, view);
         const old = renderElectricalSheet(previous, view);
+        assert.equal(matches(current, /data-sheet-context=/g).length, 4);
+        assert.equal(matches(current,
+            new RegExp(`data-sheet-context="${ROBOT_ID}"`, "g")).length, 1);
         for (const id of ["balcony-dryer", "balcony-washer",
             "balcony-outboard-sink"]) {
             const item = state.items.find((entry) => entry.id === id);
@@ -198,7 +202,7 @@ test("edits, missing prices and incomplete positions change labels without guess
 
 test("rendering and offline bundle leave the exact anonymous quote and sample intact", async () => {
     assert.equal(JSON.stringify(state), baseline);
-    assert.equal(state.items.length, 181);
+    assert.equal(state.items.length, 182);
     assert.equal(state.products.length, 28);
     assert.equal(state.revision, 0);
     assert.equal(state.undo, null);

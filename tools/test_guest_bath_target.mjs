@@ -46,7 +46,7 @@ test("public sample has a single unpriced 80cm guest tub and orphaned OVO catalo
     validateState(state);
     assert.deepEqual([state.version, state.revision, state.undo,
         state.rooms.length, state.items.length, state.products.length],
-    [5, 0, null, 13, 181, 28]);
+    [5, 0, null, 13, 182, 28]);
     const tub = byId(state, "bath-guest-tub");
     assert.deepEqual([tub.name, tub.brandModel, tub.productId,
         tub.unitPrice, tub.widthCm, tub.depthCm, tub.heightCm,

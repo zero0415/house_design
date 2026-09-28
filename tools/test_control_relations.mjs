@@ -20,6 +20,8 @@ import {
 import {
     createQuotedOutletItems, isDedicatedCircuit, isSocket,
 } from "../extensions/renovation-equipment/assets/socket-plan.js";
+import { ROBOT_ID } from
+    "../extensions/renovation-equipment/assets/robot-plan.js";
 
 const path = new URL("../files/設備規劃.json", import.meta.url);
 const raw = await readFile(path, "utf8");
@@ -36,6 +38,7 @@ const ceiling = "living-ceiling-light-01";
 const capabilities = {
     controlRelationsVersion: CONTROL_RELATIONS_VERSION,
     doorAllocationVersion: 1,
+    robotFeatureVersion: 1,
 };
 
 function assigned() {
@@ -49,7 +52,7 @@ function assigned() {
 test("anonymous v5 sample remains untouched, with no inferred same-room or cross-room links", () => {
     assert.deepEqual([publicSample.version, publicSample.revision,
         publicSample.undo, publicSample.rooms.length, publicSample.items.length,
-        publicSample.products.length], [5, 0, null, 13, 181, 28]);
+        publicSample.products.length], [5, 0, null, 13, 182, 28]);
     assert.equal(baseline.products.find((product) =>
         product.id === "sample-product-08").trackLengthCm, 150);
     assert.deepEqual(baseline.items, publicSample.items);
@@ -65,7 +68,7 @@ test("anonymous v5 sample remains untouched, with no inferred same-room or cross
     }
     assert.deepEqual(previewCircuitLinks(baseline.items), []);
     assert.equal(hasControlRelations(baseline), false);
-    assert.equal(JSON.parse(encodeSave(baseline)).formatVersion, 7);
+    assert.equal(JSON.parse(encodeSave(baseline)).formatVersion, 8);
     assert.doesNotMatch(renderOverviewPlan(baseline.rooms, baseline.items, false,
         new Set()), /data-preview-light-id=/);
     const lighting = renderElectricalSheet(baseline, "lighting-sheet");
@@ -137,10 +140,10 @@ test("reject malformed, orphaned, removed or unplaced controls without mutating 
     assert.equal(previewCircuitLinks(stale.items).length, 0);
 });
 
-test("container 7 retains controls with door attribution and CSV keeps mapped IDs", () => {
+test("container 8 retains controls with robot and door attribution; older exports stay readable", () => {
     const state = assigned();
     const document = JSON.parse(encodeSave(state));
-    assert.equal(document.formatVersion, 7);
+    assert.equal(document.formatVersion, 8);
     assert.equal(document.state.version, 5);
     assert.deepEqual(decodeSave(JSON.stringify(document)),
         { ...snapshot(state), undo: state.undo });
@@ -154,9 +157,13 @@ test("container 7 retains controls with door attribution and CSV keeps mapped ID
     })), /v5 資料/);
     const undoOnly = structuredClone(baseline);
     undoOnly.undo = snapshot(state);
-    assert.equal(JSON.parse(encodeSave(undoOnly)).formatVersion, 7);
+    assert.equal(JSON.parse(encodeSave(undoOnly)).formatVersion, 8);
     assert.deepEqual(decodeSave(encodeSave(undoOnly)).undo, undoOnly.undo);
-    assert.equal(JSON.parse(encodeSave(baseline)).formatVersion, 7);
+    assert.equal(JSON.parse(encodeSave(baseline)).formatVersion, 8);
+    const priorDoorState = structuredClone(baseline);
+    priorDoorState.items = priorDoorState.items.filter((entry) =>
+        entry.id !== ROBOT_ID);
+    assert.equal(JSON.parse(encodeSave(priorDoorState)).formatVersion, 7);
     assert.deepEqual(decodeSave(encodeSave(baseline)),
         { ...snapshot(baseline), undo: null });
     for (const version of [2, 3, 4, 5]) {

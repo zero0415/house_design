@@ -8,6 +8,7 @@ import {
 import {
     allocatedTrackDefinition, guardDoorAllocationUpdate, validateDoorAllocation,
 } from "./assets/door-allocation.js";
+import { guardRobotPlanUpdate, isPlannedRobot } from "./assets/robot-plan.js";
 import { ROOM_DRAWING_DIMENSIONS } from "./assets/house-geometry.js";
 import { DOOR_OPTIONS } from "./assets/door-options.js";
 import { QUOTED_SLIDE_TRACKS, SLIDE_TRACK_RATE_TWD } from "./assets/slide-tracks.js";
@@ -1351,7 +1352,8 @@ export function validateState(data) {
             name: requiredText(item.name, "設備名稱", 120),
             quantity: optionalNumber(item.quantity, "數量"),
             unit: requiredText(item.unit, "單位", 16),
-            brandModel: optionalText(item.brandModel, "品牌／型號", 200),
+            brandModel: isPlannedRobot(item) && item.brandModel == null ?
+                null : optionalText(item.brandModel, "品牌／型號", 200),
             unitPrice: selectedUnitPrice,
             priceCurrency: itemCurrency,
             priceSource: optionalText(item.priceSource ?? "", "價格來源", 500),
@@ -1373,7 +1375,8 @@ export function validateState(data) {
             depthCm: optionalDimension(
                 item.depthCm === undefined ? template?.depthCm ?? productDepth : item.depthCm, "設備深度"
             ),
-            heightCm: optionalDimension(item.heightCm, "門洞淨高"),
+            heightCm: optionalDimension(item.heightCm,
+                kind === "door" ? "門洞淨高" : "設備高度"),
             doorId,
             ...(Object.hasOwn(item, "doorQuoteAllocation") ? {
                 doorQuoteAllocation: item.doorQuoteAllocation,
@@ -1560,6 +1563,7 @@ export function createStore(filePath) {
             try {
                 guardControlRelationsUpdate(current, candidate);
                 guardDoorAllocationUpdate(current, candidate);
+                guardRobotPlanUpdate(current, candidate);
             } catch (error) {
                 if (!(error instanceof TypeError)) throw error;
                 throw new StoreError(400, error.message);

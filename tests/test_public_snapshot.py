@@ -1,3 +1,4 @@
+import hashlib
 import json
 import re
 import unittest
@@ -43,7 +44,7 @@ class PublicSnapshotTests(unittest.TestCase):
             with self.subTest(value=value):
                 self.assertIn(value, readme)
                 self.assertIn(value, quote)
-        self.assertIn("181 個物件與 28 款商品", readme)
+        self.assertIn("182 個物件與 28 款商品", readme)
         for value in ("原兩組各 **NT$19,000 木纖滑門**", "原報軌道額度",
                       "臥室3↔工作室", "未計算", "不自動新增費用",
                       "不自動新增費用、扣款或退還主浴軌道額度",
@@ -52,6 +53,11 @@ class PublicSnapshotTests(unittest.TestCase):
             with self.subTest(doors=value):
                 self.assertIn(value, readme)
         self.assertIn("三個主浴門位", readme)
+        for value in ("掃拖機器人", "自動上下水", "不能把未知費用解讀成免費",
+                      "renovation-equipment-offline-robot-v1", "容器 **8**",
+                      "前一版**公開匿名 181 筆**", "14 個有效開關"):
+            with self.subTest(robot=value):
+                self.assertIn(value, readme + quote)
         self.assertIn("兩筆各 **0.8 米", quote)
         self.assertIn("門片工程原報價 **164,500 元**", quote)
         self.assertIn("沒有發布原始工程／電源配置 PDF", readme)
@@ -111,11 +117,11 @@ class PublicSnapshotTests(unittest.TestCase):
         self.assertEqual((state["version"], state["revision"], state["undo"]), (5, 0, None))
         self.assertEqual(state["updatedAt"], "2026-01-01T00:00:00.000Z")
         self.assertEqual((len(state["rooms"]), len(state["items"]), len(state["products"])),
-                         (13, 181, 28))
+                         (13, 182, 28))
         rooms = {room["id"] for room in state["rooms"]}
         products = {product["id"] for product in state["products"]}
         self.assertEqual(len(products), 28)
-        self.assertEqual(len({item["id"] for item in state["items"]}), 181)
+        self.assertEqual(len({item["id"] for item in state["items"]}), 182)
         self.assertEqual({room["name"] for room in state["rooms"] if room["id"].startswith(
             "bedroom-")}, {"臥室1", "臥室2", "臥室3"})
         self.assertTrue(all(item["roomId"] in rooms and
@@ -135,6 +141,41 @@ class PublicSnapshotTests(unittest.TestCase):
         self.assertFalse(any(re.fullmatch(
             r"[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}", item["id"], re.I
         ) for item in state["items"]))
+
+    def test_robot_is_unpriced_unlinked_and_does_not_create_outlets_or_switches(self):
+        self.assertEqual(hashlib.sha256(SAMPLE.read_bytes()).hexdigest(),
+                         "b1c8a5dcd2a768acae1e99606a65caad44c53927fab5899053d44b84e685ffcc")
+        state = json.loads(SAMPLE.read_text(encoding="utf-8"))
+        robot = state["items"][-1]
+        self.assertEqual((robot["id"], robot["roomId"], robot["kind"],
+                          robot["quantity"], robot["orientation"]),
+                         ("living-auto-water-robot", "living-dining",
+                          "equipment", 1, 0))
+        self.assertAlmostEqual(robot["placement"]["x"], 335 / 369)
+        self.assertAlmostEqual(robot["placement"]["y"], 658 / 853)
+        for key in ("brandModel", "productId", "unitPrice",
+                    "installationUnitPrice", "widthCm", "depthCm", "heightCm",
+                    "outletCircuit", "circuitOutletId", "equipmentCategory",
+                    "markerStyle"):
+            with self.subTest(key=key):
+                self.assertIsNone(robot[key])
+        self.assertNotIn("outletPlanPointId", robot)
+        self.assertIn("[auto-water-robot:1]", robot["note"])
+        self.assertIn("非施工", robot["note"])
+        self.assertIn("防回流", robot["note"])
+        self.assertIn("未指定任何 R／B 標位", robot["note"])
+        self.assertEqual([sum(item.get("outletPlanPointId", "").startswith(prefix)
+                              for item in state["items"]) for prefix in ("R", "B", "C")],
+                         [51, 9, 7])
+        lights = [item for item in state["items"] if item["lightType"]
+                  and item["placement"]]
+        self.assertEqual((len(lights), sum(item["spotlightQuantity"]
+                          if item["lightType"] == "track" else item["quantity"]
+                          for item in lights)), (16, 19))
+        self.assertEqual([sum(item["switchType"] is not None and
+                              item["switchPlanStatus"] == status for item in
+                              state["items"]) for status in ("active", "removed")],
+                         [14, 2])
 
     def test_bathroom_included_installation_is_exactly_ten_zeroes(self):
         state = json.loads(SAMPLE.read_text(encoding="utf-8"))
@@ -462,7 +503,7 @@ class PublicSnapshotTests(unittest.TestCase):
                              for item in state["items"]))
         self.assertEqual((len(state["rooms"]), len(state["items"]),
                           len(state["products"]), state["revision"], state["undo"]),
-                         (13, 181, 28, 0, None))
+                         (13, 182, 28, 0, None))
 
     def test_quoted_door_and_rail_allowances_are_reassigned_not_repriced(self):
         state = json.loads(SAMPLE.read_text(encoding="utf-8"))
@@ -552,7 +593,7 @@ class PublicSnapshotTests(unittest.TestCase):
                      "bathroom-installation.js", "laundry-notes.js",
                      "quote-provenance.js", "guest-bath-plan.js",
                      "balcony-plan.js", "electrical-sheets.js",
-                     "door-allocation.js",
+                     "door-allocation.js", "robot-plan.js",
                      "circuit-preview.js", "file-actions.js"):
             self.assertIn(f"assets/{name}", {entry["path"] for entry in bundle["modules"]})
         for name in ("corridor-plan.js", "air-conditioning-plan.js"):
@@ -577,8 +618,11 @@ class PublicSnapshotTests(unittest.TestCase):
         self.assertIn('sampleURL.origin !== location.origin', bootstrap)
         self.assertIn('credentials: "omit", redirect: "error", mode: "same-origin"', bootstrap)
         self.assertIn('renovation-equipment-offline-controls-v1:', bootstrap)
+        self.assertIn('renovation-equipment-offline-doors-v1:', bootstrap)
+        self.assertIn('renovation-equipment-offline-robot-v1:', bootstrap)
         self.assertIn('renovation-equipment-offline-v1:', bootstrap)
         self.assertIn("guardControlRelationsUpdate(current, candidate)", bootstrap)
+        self.assertIn("guardRobotPlanUpdate(current, candidate)", bootstrap)
         self.assertNotIn("179", bootstrap)
         self.assertNotIn(SAMPLE.read_text(encoding="utf-8")[:100],
                          PORTABLE.read_text(encoding="utf-8"))

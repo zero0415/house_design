@@ -4,11 +4,13 @@ import { isUnknownDepthGuestTub } from "./guest-bath-plan.js";
 import {
     BALCONY_SINK_ID, isConditionalFloorDryer, isConditionalOutboardSink,
 } from "./laundry-notes.js";
+import { isPlannedRobot, robotSymbol } from "./robot-plan.js";
 
 const FURNITURE_BY_NAME = new Map(Object.entries(FURNITURE_TEMPLATES)
     .map(([type, template]) => [template.name, type]));
 
 export function objectIconKind(item) {
+    if (isPlannedRobot(item)) return "robot";
     if (item.kind === "furniture") return item.furnitureType;
     if (item.kind !== "equipment" || item.equipmentType || item.lightType ||
         item.switchType || item.outletCircuit) return null;
@@ -37,6 +39,7 @@ export function renderObjectIcon(item, width, height) {
     if (!(Number.isFinite(width) && width > 0 && Number.isFinite(height) && height > 0)) {
         throw new RangeError("物件圖示缺少有效的占地寬深。");
     }
+    if (isPlannedRobot(item)) return robotSymbol(width, height);
     if (isUnknownDepthGuestTub(item)) {
         return `<g class="object-icon unknown-depth-tub" data-tub-depth="unknown">
             <title>坐式浴缸：${item.widthCm}cm僅水平概念區段；

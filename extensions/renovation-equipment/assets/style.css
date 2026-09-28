@@ -1866,6 +1866,19 @@ p { margin: 6px 0 10px; }
 }
 .sheet-laundry-context .object-icon { opacity: .65; }
 .sheet-laundry-context:focus { outline: 3px solid #087cca; }
+.robot-symbol { stroke: #0f766e; fill: #f0fdfa; stroke-width: 1.6; }
+.robot-plan-label, .sheet-laundry-context .robot-plan-label {
+    font-size: 10px; font-weight: 600; fill: #0f665f;
+    paint-order: stroke; stroke: white; stroke-width: 2px;
+}
+.robot-caution { margin: 8px 0; }
+.robot-caution summary { cursor: pointer; }
+.robot-legend {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    padding: 8px; border: 1px solid #78a9a5; border-radius: 6px;
+}
+.robot-legend svg { flex: 0 0 48px; }
+.robot-legend strong { flex: 1 1 190px; }
 .sheet-control-relation {
     stroke: #a82b72; stroke-width: 2; stroke-dasharray: 7 5; fill: none;
 }

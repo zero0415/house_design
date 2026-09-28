@@ -1,6 +1,7 @@
 import { PLANNER_STATE_VERSION } from "./socket-plan.js";
 import { CONTROL_RELATIONS_VERSION } from "./circuit-preview.js";
 import { DOOR_ALLOCATION_VERSION } from "./door-allocation.js";
+import { ROBOT_FEATURE_VERSION } from "./robot-plan.js";
 
 export function isPortableMode() {
     return Boolean(globalThis.__RENOVATION_OFFLINE_STORE__);
@@ -28,6 +29,7 @@ export async function writePlannerState(payload) {
     payload = {
         ...payload, controlRelationsVersion: CONTROL_RELATIONS_VERSION,
         doorAllocationVersion: DOOR_ALLOCATION_VERSION,
+        robotFeatureVersion: ROBOT_FEATURE_VERSION,
     };
     if (isPortableMode()) {
         return globalThis.__RENOVATION_OFFLINE_STORE__.update(payload);

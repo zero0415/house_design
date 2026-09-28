@@ -9,6 +9,9 @@ import { trackLengthCm } from "./track-lighting.js";
 import { renderObjectIcon } from "./plan-icons.js";
 import { isConditionalFloorDryer, laundryMarkerNote } from "./laundry-notes.js";
 import {
+    isPlannedRobot, renderRobotCaution, robotMarkerLabel,
+} from "./robot-plan.js";
+import {
     CONTROL_RELATIONS_CAUTION, isControlTarget, previewControlledLights,
 } from "./circuit-preview.js";
 
@@ -140,9 +143,10 @@ function lightSymbol(item, geometry) {
     </g>`;
 }
 
-function renderLaundryContext(data) {
+function renderEquipmentContext(data) {
     const ids = new Set(["balcony-dryer", "balcony-washer", "balcony-outboard-sink"]);
-    return data.items.filter((item) => ids.has(item.id) && item.placement &&
+    return data.items.filter((item) => (ids.has(item.id) || isPlannedRobot(item)) &&
+        item.placement &&
         data.rooms.some((room) => room.id === item.roomId &&
             HOUSE_ZONE_BY_ID.has(room.id))).map((item) => {
         const geometry = roomGeometry(data.rooms.find((room) =>
@@ -161,14 +165,16 @@ function renderLaundryContext(data) {
             data-context-room="${escape(item.roomId)}"
             transform="translate(${x} ${y})"
             tabindex="0" role="img"
-            aria-label="${escape(item.name)}；${escape(laundryMarkerNote(item))}；
+            aria-label="${escape(item.name)}；${escape(isPlannedRobot(item)
+                ? item.note : laundryMarkerNote(item))}；
                 ${knownSize ? "存檔暫估占地" : "尺寸未定，符號非占地"}">
             <title>${escape(item.name)}；${escape(item.note)}</title>
             <g transform="rotate(${item.orientation ?? 0})">
                 ${renderObjectIcon(item, width, height)}
             </g>
-            <text x="0" y="${height / 2 + 16}"
-                text-anchor="middle">${label}</text>
+            ${isPlannedRobot(item) ? robotMarkerLabel() :
+                `<text x="0" y="${height / 2 + 16}"
+                    text-anchor="middle">${label}</text>`}
         </g>`;
     }).join("");
 }
@@ -344,10 +350,11 @@ export function renderElectricalSheet(state, view, selectedSwitchId = null) {
             完整文字清單在圖下方。符號非實機占地；
             短灰線只連同一標記的文字；紫紅虛線只表示明確儲存的面板對應，
             均不是實際配管走線。</p>
+        ${renderRobotCaution(data.items)}
         <div class="sheet-scroll" tabindex="0" role="region"
             aria-label="${title}可捲動圖面">
             ${renderOverviewPlan(data.rooms, data.items, false, null,
-                layers, null, 80, draw, renderLaundryContext(data) +
+                layers, null, 80, draw, renderEquipmentContext(data) +
                     (outlets ? "" : renderPreviewConnections(
                         data.rooms, data.items, null, null, true)))}
         </div>

@@ -17,6 +17,7 @@ import {
 import {
     hasDoorAllocation, isQuotedDoor, isUnquotedBalconyDoor,
 } from "./door-allocation.js";
+import { hasRobotPlan } from "./robot-plan.js";
 import { isSlideTrack } from "./budget.js";
 import { quoteProvenance } from "./quote-provenance.js";
 import {
@@ -35,7 +36,8 @@ export function encodeSave(state, exportedAt = new Date().toISOString()) {
     }
     return JSON.stringify({
         format: SAVE_FORMAT,
-        formatVersion: hasDoorAllocation(state) ? 7 :
+        formatVersion: hasRobotPlan(state) ? 8 :
+            hasDoorAllocation(state) ? 7 :
             hasControlRelations(state) ? 6 : SAVE_FORMAT_VERSION,
         exportedAt,
         state: {
@@ -65,7 +67,7 @@ export function decodeSave(text) {
     const unwrapped = versions.includes(document?.version) &&
         document?.format === undefined;
     if (!unwrapped && (document?.format !== SAVE_FORMAT ||
-        ![...versions, 6, 7].includes(document?.formatVersion))) {
+        ![...versions, 6, 7, 8].includes(document?.formatVersion))) {
         throw new RangeError("存檔格式或版本不相容；請使用本規劃器匯出的 JSON。");
     }
     const imported = unwrapped ? document : document.state;
@@ -78,6 +80,11 @@ export function decodeSave(text) {
         (imported?.version !== PLANNER_STATE_VERSION ||
             !hasDoorAllocation(imported))) {
         throw new RangeError("新版門片歸屬存檔須含 v5 資料及完整門片欄位，未改動目前規劃。");
+    }
+    if (!unwrapped && document.formatVersion === 8 &&
+        (imported?.version !== PLANNER_STATE_VERSION ||
+            !hasRobotPlan(imported))) {
+        throw new RangeError("新版掃拖機存檔須含 v5 資料及完整規劃欄位，未改動目前規劃。");
     }
     if (!versions.includes(imported?.version) ||
         !Array.isArray(imported.rooms) ||

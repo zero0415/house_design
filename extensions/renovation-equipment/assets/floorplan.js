@@ -23,6 +23,9 @@ import { isQuotedEquipment } from "./budget.js";
 import {
     isQuotedDoor, isUnquotedBalconyDoor,
 } from "./door-allocation.js";
+import {
+    isPlannedRobot, ROBOT_SYMBOL_SIZE, robotMarkerLabel,
+} from "./robot-plan.js";
 import { markerQuoteProvenance, quoteProvenance } from "./quote-provenance.js";
 import {
     isConditionalFloorDryer, isConditionalOutboardSink, laundryMarkerNote,
@@ -262,6 +265,9 @@ function itemDimensions(item, template) {
 
 export function itemFootprint(item, geometry) {
     if (item.kind === "door") return null;
+    if (isPlannedRobot(item) && !(item.widthCm && item.depthCm)) {
+        return { width: ROBOT_SYMBOL_SIZE, height: ROBOT_SYMBOL_SIZE };
+    }
     if (isUnknownDepthGuestTub(item)) {
         const width = item.widthCm *
             (geometry.cmScale ?? PLAN_PIXELS_PER_CM);
@@ -314,7 +320,7 @@ export function placementFootprint(item, geometry) {
     const footprint = itemFootprint(item, geometry);
     if (!footprint) return null;
     if (item.markerStyle === "square-label") return footprint;
-    if (isFreshAirUnit(item) || isToiletRinseKit(item) ||
+    if (isPlannedRobot(item) || isFreshAirUnit(item) || isToiletRinseKit(item) ||
         isHeatedTowelRail(item) || isBathGrabBar(item) || item.switchType ||
         planDisplayCategory(item) === "outlets" ||
         item.lightType === "recessed" ||
@@ -833,12 +839,17 @@ function overviewMarker(item, geometry, name, previewEnabled = false, items = []
         ${isConditionalFloorDryer(item) || isConditionalOutboardSink(item) ?
             "balcony-conditional" : ""}"
         transform="translate(${x} ${y})"
+        ${isPlannedRobot(item) ? `data-robot-id="${escapeSvg(item.id)}"` : ""}
         ${quoteMarkerAttributes(source)}
         ${item.outletPlanPointId ? `data-outlet-point-id="${escapeSvg(item.outletPlanPointId)}"` : ""}
         ${previewEnabled && previewable ? `data-preview-item-id="${escapeSvg(item.id)}"
             role="button" tabindex="0" aria-label="切換${escapeSvg(item.name)}的模擬照明"` :
-            source ? `role="button" tabindex="0" aria-label="${escapeSvg(item.name)}"` : ""}>
+            source ? `role="button" tabindex="0" aria-label="${escapeSvg(item.name)}"` :
+                isPlannedRobot(item)
+                    ? `role="img" tabindex="0" aria-label="${escapeSvg(item.name)}；尺寸與門口淨空待核，符號非占地"`
+                    : ""}>
         <title>${escapeSvg(name)}：${escapeSvg(item.name)}；${escapeSvg(laundryMarkerNote(item))}
+            ${isPlannedRobot(item) ? escapeSvg(item.note) : ""}
             ${escapeSvg(vanity?.warning ?? "")}
             ${airConditioner ? `，出風${directionName(item.orientation)}` :
                 freshAir ? "，室外進氣新風機暫定位置；機型、管路與價格待核" :
@@ -909,6 +920,7 @@ function overviewMarker(item, geometry, name, previewEnabled = false, items = []
         ${!squareLabel && applianceLabel ? `<text class="overview-appliance-label"
             x="${-width / 2 + 4}" y="${-height / 2 + 15}"
             text-anchor="start">${applianceLabel}</text>` : ""}
+        ${isPlannedRobot(item) ? robotMarkerLabel() : ""}
         ${!squareLabel && airConditioner && item.orientation !== null ? `<path class="ac-direction"
             d="M${8 * ICON_SCALE} 0 H${22 * ICON_SCALE}
                 M${18 * ICON_SCALE} ${-3 * ICON_SCALE}
@@ -1470,7 +1482,7 @@ function detailMarker(item, geometry, selectedItemId, previewEnabled = false,
                 ceilingLight || trackLight) ? "切換模擬照明：" : "拖動"}
                 ${escapeSvg(item.name)}${previewEnabled && (switchOption || downlight ||
                 ceilingLight || trackLight) ? "" : "的位置"}">
-            <title>${escapeSvg(item.name)}；${escapeSvg(vanity?.warning ?? "")}${escapeSvg(laundryMarkerNote(item))}${source ? `；${escapeSvg(source)}；` : ""}${airConditioner ? `，出風${directionName(item.orientation)}` :
+            <title>${escapeSvg(item.name)}；${isPlannedRobot(item) ? escapeSvg(item.note) : ""}${escapeSvg(vanity?.warning ?? "")}${escapeSvg(laundryMarkerNote(item))}${source ? `；${escapeSvg(source)}；` : ""}${airConditioner ? `，出風${directionName(item.orientation)}` :
                 freshAir ? "，室外進氣位置示意，機型及浴室適用性待核" :
                     rinseKit ? "，馬桶三叉管和沖洗器；安裝費及接頭待確認" :
                         towelRail ? "，衛浴非淋浴側牆面暫位；配線防潮及安裝待確認" :
@@ -1498,6 +1510,7 @@ function detailMarker(item, geometry, selectedItemId, previewEnabled = false,
                         "尺寸待填"}；
                 ${invalid ? "與牆線或固定設施相交，需確認；" : ""}按住可拖動）</title>
             ${symbol}
+            ${isPlannedRobot(item) ? robotMarkerLabel() : ""}
         </g>
         ${rotateHandle}
     </g>${dimensions}`;

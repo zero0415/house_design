@@ -50,6 +50,7 @@ import {
     DOOR_TRACK_CAUTION, isAllocatedDoorItem, isQuotedDoor,
     isUnquotedBalconyDoor,
 } from "./door-allocation.js";
+import { isPlannedRobot, renderRobotCaution } from "./robot-plan.js";
 import {
     BEDROOM2_PARTITION_ID, BEDROOM2_PARTITION_OPTIONS, BEDROOM2_PARTITION_QUOTED_AREA,
 } from "./partition-options.js";
@@ -1164,6 +1165,9 @@ function renderItem(item, { displayName = null, circuitNumber = null } = {}) {
                     ? "外形深度（cm，可修改）" : "實際深度（cm）", { cssClass: "dimension" })}
             ${item.kind === "door" ? field(item, "widthCm", "門洞淨寬（cm）", { cssClass: "dimension" }) +
                 field(item, "heightCm", "門洞淨高（cm）", { cssClass: "dimension" }) : ""}
+            ${isPlannedRobot(item) ? field(item, "heightCm",
+                "實際高度（cm，機身／基座範圍須註明）",
+                { cssClass: "dimension" }) : ""}
             ${splitAC ? field(item, "outdoorWidthCm", "室外機機身長邊（cm，暫估）",
                 { cssClass: "dimension" }) +
                 field(item, "outdoorDepthCm", "室外機機身短邊（cm，暫估）",
@@ -2430,6 +2434,7 @@ function renderPlanView() {
             <div class="plan-display-actions">${visibleControls}${lightingControls}${sourceToggle}</div>
             ${renderACPlanningWarnings(state.items)}
             ${renderLaundryWarnings(state.items)}
+            ${renderRobotCaution(state.items)}
             ${renderVanityWarning(state.items)}
             ${visibilityNote}
             ${lightingLegend}
@@ -2703,6 +2708,7 @@ function renderPlanView() {
         ${renderACPlanningWarnings(items)}
         ${renderLaundryWarnings(room.id === "balcony"
             ? [...items, ...[platformDryer, platformSink].filter(Boolean)] : items)}
+        ${renderRobotCaution(items)}
         ${renderVanityWarning(items)}
         ${diagramLegend}
         ${roomSizeControls}

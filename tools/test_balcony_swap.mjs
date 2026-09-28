@@ -23,9 +23,13 @@ import { linkedProductMismatch } from
 import {
     createStore, StoreError, summarize, validateState,
 } from "../extensions/renovation-equipment/state.mjs";
+import { ROBOT_ID } from
+    "../extensions/renovation-equipment/assets/robot-plan.js";
 
-const sample = JSON.parse(await readFile(
+const currentSample = JSON.parse(await readFile(
     new URL("../files/設備規劃.json", import.meta.url), "utf8"));
+const sample = structuredClone(currentSample);
+sample.items = sample.items.filter((entry) => entry.id !== ROBOT_ID);
 const item = (state, id) => state.items.find((entry) => entry.id === id);
 const product = (state, id) => state.products.find((entry) => entry.id === id);
 const snapshot = (state) => ({
@@ -59,6 +63,8 @@ const sink = item(sample, BALCONY_SINK_ID);
 const balcony = roomGeometry(sample.rooms.find((room) => room.id === "balcony"));
 
 test("published sample is anonymous v5 with one unpriced basin and unchanged prices", () => {
+    assert.equal(currentSample.items.length, 182);
+    assert.deepEqual(currentSample.items.slice(0, -1), sample.items);
     validateState(sample);
     assert.deepEqual([sample.version, sample.revision, sample.undo,
         sample.rooms.length, sample.items.length, sample.products.length],
