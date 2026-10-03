@@ -32,6 +32,7 @@ const path = new URL("../files/設備規劃.json", import.meta.url);
 const raw = await readFile(path, "utf8");
 const currentSample = JSON.parse(raw);
 const sample = structuredClone(currentSample);
+delete sample.constructionCalendar;
 sample.items = sample.items.filter((entry) => entry.id !== ROBOT_ID);
 const item = (state, id) => state.items.find((entry) => entry.id === id);
 const snapshot = (state) => structuredClone({
@@ -95,6 +96,7 @@ const migration = migrateDoorAllocation(before);
 
 test("public release is v5 r0 without private history and the exact +3500 attribution", () => {
     assert.equal(currentSample.items.length, 182);
+    assert.equal(currentSample.constructionCalendar.events.length, 13);
     assert.equal(createHash("sha256").update(
         JSON.stringify(sample, null, 2) + "\n").digest("hex"),
         "a427936df43e0ec5b487002306951b33a99c9d2497a265970f7a227f9edc33dd");

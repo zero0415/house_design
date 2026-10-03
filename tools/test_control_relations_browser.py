@@ -68,6 +68,99 @@ def read(page, mode):
     )
 
 
+def inspect_pristine_calendar(page, mode, initial):
+    writes = []
+    page.on("request", lambda request: writes.append(
+        (request.method, request.url)) if request.method != "GET" else None)
+    page.get_by_role("tab", name="開工行事曆", exact=True).click()
+    cache_before = page.evaluate("JSON.stringify(localStorage)")
+    page.evaluate("""() => {
+        window.__calendarViewWrites = [];
+        const setItem = Storage.prototype.setItem;
+        Storage.prototype.setItem = function(...args) {
+            window.__calendarViewWrites.push(args[0]);
+            return setItem.apply(this, args);
+        };
+        const store = globalThis.__RENOVATION_OFFLINE_STORE__;
+        if (store) {
+            const update = store.update;
+            store.update = function(...args) {
+                window.__calendarViewWrites.push('store.update');
+                return update.apply(this, args);
+            };
+        }
+    }""")
+    assert page.locator("[data-calendar-month-view]").count() == 1
+    page.locator("[data-calendar-expand]").click()
+    assert page.locator("[data-calendar-month-view]").evaluate_all(
+        "nodes => nodes.map(node => node.dataset.calendarMonthView)") == [
+            "2026-10", "2026-11", "2026-12", "2027-01",
+        ]
+    october = page.locator('[data-calendar-month-view="2026-10"]')
+    kickoff = october.locator(
+        '.calendar-event[data-calendar-event="construction-start"]')
+    layout = october.locator(
+        '.calendar-event[data-calendar-event="construction-layout"]')
+    assert kickoff.locator(
+        ".calendar-event-roles .calendar-role").all_inner_texts() == [
+            "屋主", "輕隔間廠商代表",
+        ]
+    assert layout.locator(
+        ".calendar-event-roles .calendar-role").all_inner_texts() == [
+            "屋主", "廚房工人", "系統櫃工人",
+        ]
+    assert kickoff.locator(
+        ".calendar-owner .calendar-person-icon").count() == 1
+    assert layout.locator(
+        ".calendar-owner .calendar-person-icon").count() == 1
+    for rest, next_day in (
+        ("2026-10-25", "2026-10-26"),
+        ("2026-11-01", "2026-11-02"),
+        ("2026-11-08", "2026-11-09"),
+    ):
+        month = rest[:7]
+        week = page.locator(
+            f'[data-calendar-month-view="{month}"] '
+            f'.calendar-week:has([data-calendar-date="{rest}"])')
+        assert "師傅固定休假" in week.locator(
+            ".calendar-sunday-rest").first.inner_text()
+        assert week.locator(
+            '[data-calendar-event="construction-utilities"]'
+        ).get_attribute("data-segment-start") == next_day
+    page.locator("#calendar-month-views").screenshot(
+        path=str(artifacts / f"pristine-{mode}-edge-four-months-1280.png"))
+    for width in (320, 390):
+        page.set_viewport_size({"width": width, "height": 844})
+        assert page.evaluate(
+            "document.documentElement.scrollWidth - innerWidth") <= 1
+        assert page.locator(".calendar-scroll").count() == 4
+        for bar, name in ((kickoff, "oct09"), (layout, "oct17")):
+            bar.scroll_into_view_if_needed()
+            assert bar.locator(
+                ".calendar-event-roles .calendar-role").evaluate_all(
+                    "nodes => nodes.every(node => parseFloat("
+                    "getComputedStyle(node).fontSize) >= 12)") is True
+            bar.screenshot(path=str(artifacts /
+                                    f"pristine-{mode}-edge-{name}-{width}-bar.png"))
+            page.screenshot(path=str(artifacts /
+                                     f"pristine-{mode}-edge-{name}-{width}-viewport.png"))
+        if width == 390:
+            page.locator(".calendar-scroll").evaluate_all(
+                "nodes => nodes.forEach(node => node.scrollLeft = 0)")
+            page.locator("#calendar-month-views").screenshot(
+                path=str(artifacts /
+                         f"pristine-{mode}-edge-four-months-390.png"))
+    assert read(page, mode) == initial
+    assert page.evaluate("JSON.stringify(localStorage)") == cache_before
+    assert page.evaluate("window.__calendarViewWrites") == []
+    assert not writes, writes
+    page.locator("[data-calendar-expand]").click()
+    assert page.locator("[data-calendar-month-view]").count() == 1
+    assert read(page, mode) == initial
+    page.get_by_role("tab", name="格局圖", exact=True).click()
+    page.set_viewport_size({"width": 1280, "height": 1050})
+
+
 def wait_for_assignment(page, mode, item_id, expected):
     page.wait_for_function("""async ({mode,id,expected}) => {
         const state = mode === 'offline'
@@ -123,6 +216,7 @@ with tempfile.TemporaryDirectory(prefix="public-control-relations-") as director
                 assert snapshot(original) == snapshot(normalized_source)
                 assert original["undo"] is None
                 budget = page.locator(".budget").inner_text()
+                inspect_pristine_calendar(page, mode, original)
 
                 page.locator('[data-action="toggle-light-preview"]').click()
                 expect(page.locator("[data-preview-light-id]")).to_have_count(0)
@@ -206,7 +300,7 @@ with tempfile.TemporaryDirectory(prefix="public-control-relations-") as director
                     page.locator("#save-file").click()
                 download.value.save_as(str(export_path))
                 exported = json.loads(export_path.read_text(encoding="utf-8"))
-                assert exported["formatVersion"] == 8
+                assert exported["formatVersion"] == 10
                 assert snapshot(exported["state"]) == snapshot(second)
                 page.reload()
                 expect(page.locator(".overview-svg")).to_be_visible()
@@ -242,6 +336,154 @@ with tempfile.TemporaryDirectory(prefix="public-control-relations-") as director
                 expect(page.locator(".lighting-legend")).to_contain_text(
                     "已亮 15 組")
                 assert read(page, mode) == before_preview
+
+                page.get_by_role("tab", name="開工行事曆", exact=True).click()
+                expect(page.locator(".calendar-agenda li")).to_have_count(13)
+                expect(page.locator(
+                    '.calendar-agenda li:has('
+                    '[data-calendar-event="construction-start"]) '
+                    '.calendar-role'
+                )).to_have_count(2)
+                expect(page.locator(
+                    '.calendar-agenda li:has('
+                    '[data-calendar-event="construction-elevator-protection"]) '
+                    '.calendar-roles-empty'
+                )).to_have_count(1)
+                layout = page.locator(
+                    '.calendar-agenda li:has('
+                    '[data-calendar-event="construction-layout"])'
+                )
+                expect(layout.locator(".calendar-role")).to_have_count(3)
+                expect(layout.locator(".calendar-owner")).to_contain_text("屋主")
+                assert "屋主、廚房工人、系統櫃工人" in page.locator(
+                    '[data-calendar-event="construction-layout"].calendar-event'
+                ).first.get_attribute("aria-label")
+                assert len(read(page, mode)["constructionCalendar"]["events"]) == 13
+                before_roles = read(page, mode)
+                layout.locator(
+                    '[data-calendar-event="construction-layout"]'
+                ).click()
+                form = page.locator("[data-calendar-form]")
+                field = form.locator('[name="attendees"]')
+                expect(field).to_have_value("屋主\n廚房工人\n系統櫃工人")
+                field.fill(f"屋主{chr(51)}人")
+                form.get_by_role("button", name="儲存工項").click()
+                expect(page.locator(".calendar-error")).to_contain_text(
+                    "不填人數")
+                assert read(page, mode) == before_roles
+                field.fill("屋主\n廚房工人")
+                expect(form.locator(
+                    ".calendar-role-preview .calendar-role")).to_have_count(2)
+                assert read(page, mode) == before_roles
+                form.get_by_role("button", name="儲存工項").click()
+                page.wait_for_function("""async ({mode,revision}) => {
+                    const state = mode === 'offline'
+                        ? await globalThis.__RENOVATION_OFFLINE_STORE__.read()
+                        : await fetch('/api/state').then(response => response.json());
+                    return state.revision === revision &&
+                        state.constructionCalendar.events.find(entry =>
+                            entry.id === 'construction-layout')
+                            .attendees.length === 2;
+                }""", arg={"mode": mode,
+                            "revision": before_roles["revision"] + 1})
+                two_roles = read(page, mode)
+                assert snapshot(two_roles) == snapshot(before_roles)
+                assert two_roles["undo"] == before_roles["undo"]
+                assert len(two_roles["constructionCalendar"]["undo"]) == 13
+                assert next(entry for entry in two_roles[
+                    "constructionCalendar"]["undo"] if entry["id"] ==
+                    "construction-layout")["attendees"] == [
+                        "屋主", "廚房工人", "系統櫃工人",
+                    ]
+                assert page.locator(".budget").inner_text() == budget
+
+                if mode == "http":
+                    old_writer = {**two_roles,
+                        "expectedRevision": two_roles["revision"],
+                        "controlRelationsVersion": 1,
+                        "doorAllocationVersion": 1,
+                        "robotFeatureVersion": 1,
+                        "calendarFeatureVersion": 1}
+                    response = page.request.put(
+                        f"{url}api/state", data=old_writer,
+                    )
+                    assert response.status == 400
+                    assert "出席角色" in response.json()["error"]
+                    assert read(page, mode) == two_roles
+
+                with page.expect_download() as download:
+                    page.locator("[data-calendar-csv]").click()
+                csv = Path(download.value.path()).read_text(
+                    encoding="utf-8-sig")
+                assert "誰要出席（預計角色）" in csv
+                assert "屋主、廚房工人" in csv
+                assert f"屋主{chr(51)}人" not in csv
+                with page.expect_download() as download:
+                    page.locator("#save-file").click()
+                role_export = json.loads(Path(
+                    download.value.path()).read_text(encoding="utf-8"))
+                assert role_export["formatVersion"] == 10
+                assert role_export["state"]["constructionCalendar"] == (
+                    two_roles["constructionCalendar"])
+                page.set_viewport_size({"width": 390, "height": 844})
+                page.locator(".calendar-agenda").screenshot(
+                    path=str(artifacts / f"{mode}-attendee-agenda-mobile.png")
+                )
+                page.set_viewport_size({"width": 1280, "height": 1050})
+                page.reload()
+                expect(page.locator(".overview-svg")).to_be_visible()
+                assert read(page, mode) == two_roles
+                page.get_by_role("tab", name="開工行事曆", exact=True).click()
+                page.locator("[data-calendar-undo]").click()
+                page.wait_for_function("""async ({mode,revision}) => {
+                    const state = mode === 'offline'
+                        ? await globalThis.__RENOVATION_OFFLINE_STORE__.read()
+                        : await fetch('/api/state').then(response => response.json());
+                    return state.revision === revision &&
+                        state.constructionCalendar.undo === null;
+                }""", arg={"mode": mode,
+                            "revision": two_roles["revision"] + 1})
+                restored_roles = read(page, mode)
+                assert snapshot(restored_roles) == snapshot(before_roles)
+                assert restored_roles["undo"] == before_roles["undo"]
+                assert next(entry for entry in restored_roles[
+                    "constructionCalendar"]["events"] if entry["id"] ==
+                    "construction-layout")["attendees"] == [
+                        "屋主", "廚房工人", "系統櫃工人",
+                    ]
+
+                older_calendar = deepcopy(restored_roles)
+                older_calendar["constructionCalendar"]["version"] = 1
+                older_calendar["constructionCalendar"]["events"] = [
+                    {key: value for key, value in entry.items()
+                     if key != "attendees"}
+                    for entry in older_calendar["constructionCalendar"]["events"]
+                ]
+                older_calendar["constructionCalendar"]["undo"] = []
+                page.locator("#load-file-input").set_input_files({
+                    "name": "older-public-calendar-v1.json",
+                    "mimeType": "application/json",
+                    "buffer": json.dumps({
+                        "format": "renovation-equipment-planner",
+                        "formatVersion": 9, "state": older_calendar,
+                    }, ensure_ascii=False).encode("utf-8"),
+                })
+                page.wait_for_function("""async ({mode,revision}) => {
+                    const state = mode === 'offline'
+                        ? await globalThis.__RENOVATION_OFFLINE_STORE__.read()
+                        : await fetch('/api/state').then(response => response.json());
+                    return state.revision === revision;
+                }""", arg={"mode": mode,
+                            "revision": restored_roles["revision"] + 1})
+                preserved = read(page, mode)
+                assert preserved["constructionCalendar"]["version"] == 2
+                assert next(entry for entry in preserved[
+                    "constructionCalendar"]["events"] if entry["id"] ==
+                    "construction-layout")["attendees"] == [
+                        "屋主", "廚房工人", "系統櫃工人",
+                    ]
+                assert snapshot(preserved) == snapshot(restored_roles)
+                assert preserved["undo"] == restored_roles["undo"]
                 assert errors == [], errors
                 assert remote == [], remote
                 context.close()
@@ -261,6 +503,7 @@ with tempfile.TemporaryDirectory(prefix="public-control-relations-") as director
 
             context = browser.new_context()
             previous = deepcopy(normalized_source)
+            del previous["constructionCalendar"]
             previous["revision"] = 700
             next(entry for entry in previous["items"] if entry["id"] ==
                  "balcony-water-heater")["note"] += " 本機未匯出修改。"
@@ -281,7 +524,9 @@ with tempfile.TemporaryDirectory(prefix="public-control-relations-") as director
                 old:'renovation-equipment-offline-v1:' + location.pathname,
                 controls:'renovation-equipment-offline-controls-v1:' + location.pathname,
                 doors:'renovation-equipment-offline-doors-v1:' + location.pathname,
-                next:'renovation-equipment-offline-robot-v1:' + location.pathname,
+                robot:'renovation-equipment-offline-robot-v1:' + location.pathname,
+                calendar:'renovation-equipment-offline-calendar-v1:' + location.pathname,
+                next:'renovation-equipment-offline-calendar-attendees-v1:' + location.pathname,
             })""")
             assert page.evaluate(
                 "key => JSON.parse(localStorage.getItem(key))",
@@ -290,9 +535,14 @@ with tempfile.TemporaryDirectory(prefix="public-control-relations-") as director
                 "key => localStorage.getItem(key)", keys["controls"]) is None
             assert page.evaluate(
                 "key => localStorage.getItem(key)", keys["doors"]) is None
+            assert page.evaluate(
+                "key => localStorage.getItem(key)", keys["robot"]) is None
+            assert page.evaluate(
+                "key => localStorage.getItem(key)", keys["calendar"]) is None
             copied = page.evaluate(
                 "key => JSON.parse(localStorage.getItem(key))", keys["next"])
             assert snapshot(copied) == snapshot(previous)
+            assert "constructionCalendar" not in read(page, "offline")
             page.evaluate(
                 "({key,state}) => localStorage.setItem(key,JSON.stringify(state))",
                 {"key": keys["old"], "state": source},
@@ -309,6 +559,10 @@ with tempfile.TemporaryDirectory(prefix="public-control-relations-") as director
                     .revision === 701""")
             imported = read(page, "offline")
             assert imported["undo"] == snapshot(previous)
+            assert imported["constructionCalendar"]["version"] == 2
+            assert next(entry for entry in imported["constructionCalendar"]
+                        ["events"] if entry["id"] == "construction-layout")[
+                            "attendees"] == ["屋主", "廚房工人", "系統櫃工人"]
             page.locator("#undo-last").click()
             page.wait_for_function("""async () =>
                 (await globalThis.__RENOVATION_OFFLINE_STORE__.read())
@@ -326,8 +580,10 @@ with tempfile.TemporaryDirectory(prefix="public-control-relations-") as director
 
             context = browser.new_context()
             old_rollback = deepcopy(normalized_source)
+            del old_rollback["constructionCalendar"]
             old_rollback["revision"] = 710
             controls_save = deepcopy(normalized_source)
+            del controls_save["constructionCalendar"]
             controls_save["revision"] = 711
             next(entry for entry in controls_save["items"] if
                  entry["id"] == switch_id)["controlledLightIds"] = [track_id]
@@ -352,14 +608,14 @@ with tempfile.TemporaryDirectory(prefix="public-control-relations-") as director
             expect(page.locator("[data-control-light-id]")).to_have_count(1)
             control_key = page.evaluate(
                 "'renovation-equipment-offline-controls-v1:' + location.pathname")
-            robot_key = page.evaluate(
-                "'renovation-equipment-offline-robot-v1:' + location.pathname")
+            attendees_key = page.evaluate(
+                "'renovation-equipment-offline-calendar-attendees-v1:' + location.pathname")
             assert page.evaluate(
                 "key => JSON.parse(localStorage.getItem(key))",
                 control_key) == controls_save
             assert snapshot(page.evaluate(
                 "key => JSON.parse(localStorage.getItem(key))",
-                robot_key)) == snapshot(controls_save)
+                attendees_key)) == snapshot(controls_save)
             page.evaluate(
                 "({key,state}) => localStorage.setItem(key,JSON.stringify(state))",
                 {"key": control_key, "state": old_rollback},
@@ -367,12 +623,13 @@ with tempfile.TemporaryDirectory(prefix="public-control-relations-") as director
             page.reload()
             expect(page.locator(".overview-svg")).to_be_visible()
             assert snapshot(read(page, "offline")) == snapshot(controls_save), (
-                "Existing robot cache must outrank the older controls cache"
+                "Existing attendee cache must outrank the older controls cache"
             )
             context.close()
 
             context = browser.new_context(accept_downloads=True)
             doors_save = deepcopy(normalized_source)
+            del doors_save["constructionCalendar"]
             doors_save["items"] = [entry for entry in doors_save["items"]
                                    if entry["id"] != "living-auto-water-robot"]
             doors_save["revision"] = 712
@@ -409,7 +666,7 @@ with tempfile.TemporaryDirectory(prefix="public-control-relations-") as director
             copied = page.evaluate(
                 "key => JSON.parse(localStorage.getItem(key))",
                 page.evaluate(
-                    "'renovation-equipment-offline-robot-v1:' + location.pathname"))
+                    "'renovation-equipment-offline-calendar-attendees-v1:' + location.pathname"))
             assert snapshot(copied) == snapshot(saved_door_plan)
             with page.expect_download() as download:
                 page.locator("#save-file").click()
@@ -426,6 +683,107 @@ with tempfile.TemporaryDirectory(prefix="public-control-relations-") as director
             expect(page.locator(".overview-svg")).to_be_visible()
             assert read(page, "offline")["revision"] == 712
             context.close()
+
+            context = browser.new_context(accept_downloads=True)
+            old_calendar = deepcopy(normalized_source)
+            old_calendar["revision"] = 715
+            old_calendar["constructionCalendar"]["version"] = 1
+            old_calendar["constructionCalendar"]["events"] = [
+                {key: value for key, value in entry.items()
+                 if key != "attendees"}
+                for entry in old_calendar["constructionCalendar"]["events"]
+                if entry["id"] != "construction-elevator-protection"
+            ]
+            old_calendar["constructionCalendar"]["undo"] = []
+            old_robot = deepcopy(old_calendar)
+            old_robot["revision"] = 716
+            del old_robot["constructionCalendar"]
+            context.add_init_script(script=f"""
+                if (location.protocol === 'file:' &&
+                    !localStorage.getItem('calendar-attendee-test-seeded')) {{
+                    localStorage.setItem(
+                        'renovation-equipment-offline-calendar-v1:' +
+                        location.pathname,
+                        JSON.stringify({json.dumps(old_calendar, ensure_ascii=False)}));
+                    localStorage.setItem(
+                        'renovation-equipment-offline-robot-v1:' +
+                        location.pathname,
+                        JSON.stringify({json.dumps(old_robot, ensure_ascii=False)}));
+                    localStorage.setItem('calendar-attendee-test-seeded', '1');
+                }}
+            """)
+            page = context.new_page()
+            page.on("dialog", lambda dialog: dialog.accept())
+            page.goto(portable)
+            expect(page.locator(".overview-svg")).to_be_visible()
+            saved_calendar = read(page, "offline")
+            assert saved_calendar["revision"] == 715
+            assert saved_calendar["constructionCalendar"]["version"] == 1
+            assert all("attendees" not in entry for entry in
+                       saved_calendar["constructionCalendar"]["events"])
+            attendee_key = page.evaluate(
+                "'renovation-equipment-offline-calendar-attendees-v1:' + location.pathname")
+            prior_key = page.evaluate(
+                "'renovation-equipment-offline-calendar-v1:' + location.pathname")
+            assert page.evaluate(
+                "key => JSON.parse(localStorage.getItem(key))",
+                prior_key) == old_calendar
+            copied = page.evaluate(
+                "key => JSON.parse(localStorage.getItem(key))",
+                attendee_key)
+            assert copied["constructionCalendar"]["version"] == 1
+            assert snapshot(copied) == snapshot(saved_calendar)
+            page.get_by_role("tab", name="開工行事曆", exact=True).click()
+            expect(page.locator(".calendar-owner")).to_have_count(0)
+            expect(page.locator(".calendar-roles-empty")).to_have_count(12)
+            with page.expect_download() as download:
+                page.locator("#save-file").click()
+            assert json.loads(Path(
+                download.value.path()).read_text(
+                encoding="utf-8"))["formatVersion"] == 9
+            page.locator(
+                '.calendar-agenda [data-calendar-event="construction-layout"]'
+            ).click()
+            page.locator('[data-calendar-form] [name="attendees"]').fill("屋主")
+            page.locator(
+                '[data-calendar-form] button[type="submit"]').click()
+            page.wait_for_function("""async () => {
+                const state = await globalThis.__RENOVATION_OFFLINE_STORE__.read();
+                return state.revision === 716 &&
+                    state.constructionCalendar.version === 2 &&
+                    state.constructionCalendar.events.find(entry =>
+                        entry.id === 'construction-layout')
+                        .attendees[0] === '屋主';
+            }""")
+            promoted = read(page, "offline")
+            assert snapshot(promoted) == snapshot(saved_calendar)
+            assert promoted["undo"] == saved_calendar["undo"]
+            assert page.evaluate(
+                "key => JSON.parse(localStorage.getItem(key))",
+                prior_key) == old_calendar
+            with page.expect_download() as download:
+                page.locator("#save-file").click()
+            assert json.loads(Path(
+                download.value.path()).read_text(
+                encoding="utf-8"))["formatVersion"] == 10
+            page.evaluate(
+                """({key,state}) => localStorage.setItem(key,JSON.stringify(state))""",
+                {"key": prior_key, "state": old_robot},
+            )
+            page.reload()
+            expect(page.locator(".overview-svg")).to_be_visible()
+            assert read(page, "offline")["revision"] == 716
+            page.evaluate(
+                "key => localStorage.setItem(key,'{broken')",
+                attendee_key,
+            )
+            page.reload()
+            expect(page.locator("#save-status")).to_contain_text(
+                "暫存資料無法驗證")
+            assert page.evaluate(
+                "key => localStorage.getItem(key)",
+                attendee_key) == "{broken"
+            context.close()
             browser.close()
     finally:
         server.terminate()
@@ -433,4 +791,4 @@ with tempfile.TemporaryDirectory(prefix="public-control-relations-") as director
 
 assert source_path.read_bytes() == raw
 print("PASS: isolated HTTP and offline Edge explicit controls, "
-      "Undo, export, no remote requests, robot/doors/controls cache priority")
+      "role edits/Undo/JSON9→10, no remote requests, attendee/older cache priority")

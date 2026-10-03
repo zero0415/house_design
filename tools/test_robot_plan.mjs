@@ -32,7 +32,9 @@ import {
 
 const file = new URL("../files/設備規劃.json", import.meta.url);
 const raw = await readFile(file, "utf8");
-const sample = JSON.parse(raw);
+const currentSample = JSON.parse(raw);
+const sample = structuredClone(currentSample);
+delete sample.constructionCalendar;
 const before = structuredClone(sample);
 before.items = before.items.filter((item) => item.id !== ROBOT_ID);
 const snapshot = (state) => structuredClone({
@@ -48,7 +50,9 @@ const capabilities = {
 const count = (text, regex) => [...text.matchAll(regex)].length;
 
 test("public robot release adds only one unknown-price item to the reviewed door sample", () => {
-    assert.equal(createHash("sha256").update(raw).digest("hex"),
+    assert.equal(currentSample.constructionCalendar.events.length, 13);
+    assert.equal(createHash("sha256").update(
+        JSON.stringify(sample, null, 2) + "\n").digest("hex"),
         "b1c8a5dcd2a768acae1e99606a65caad44c53927fab5899053d44b84e685ffcc");
     assert.equal(createHash("sha256").update(
         JSON.stringify(before, null, 2) + "\n").digest("hex"),

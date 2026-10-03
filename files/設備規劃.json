@@ -11651,5 +11651,252 @@
       "lightSpecSource": ""
     }
   ],
-  "undo": null
+  "undo": null,
+  "constructionCalendar": {
+    "version": 2,
+    "seed": "public-construction-draft-2026-10-v1",
+    "events": [
+      {
+        "id": "construction-start",
+        "title": "開工.拆除確認",
+        "start": "2026-10-09",
+        "end": "2026-10-09",
+        "note": "依使用者授權之工期清單暫排，未經承包商確認；日期含首尾日，不自動避開週末或假日。",
+        "status": "tentative",
+        "attendees": [
+          "屋主",
+          "輕隔間廠商代表"
+        ]
+      },
+      {
+        "id": "construction-demolition",
+        "title": "拆除施工",
+        "start": "2026-10-13",
+        "end": "2026-10-16",
+        "note": "依使用者授權之工期清單暫排，未經承包商確認；日期含首尾日，不自動避開週末或假日。",
+        "status": "tentative",
+        "attendees": []
+      },
+      {
+        "id": "construction-elevator-protection",
+        "title": "電梯走道保護",
+        "start": "2026-10-13",
+        "end": "2026-10-13",
+        "note": "電梯與走道保護一日條件式暫排；保護範圍、材料、管理許可、拆裝工資與費用尚待核對。不能推定原工程報價已含或免費，不自動延長或改期任何既有工項。",
+        "status": "tentative",
+        "attendees": []
+      },
+      {
+        "id": "construction-layout",
+        "title": "水電放樣",
+        "start": "2026-10-17",
+        "end": "2026-10-17",
+        "note": "依使用者授權之工期清單暫排，未經承包商確認；日期含首尾日，不自動避開週末或假日。",
+        "status": "tentative",
+        "attendees": [
+          "屋主",
+          "廚房工人",
+          "系統櫃工人"
+        ]
+      },
+      {
+        "id": "construction-wall",
+        "title": "輕隔間隔單面牆",
+        "start": "2026-10-17",
+        "end": "2026-10-17",
+        "note": "依使用者授權之工期清單暫排，未經承包商確認；日期含首尾日，不自動避開週末或假日。",
+        "status": "tentative",
+        "attendees": []
+      },
+      {
+        "id": "construction-utilities",
+        "title": "水電施工",
+        "start": "2026-10-19",
+        "end": "2026-11-13",
+        "note": "依使用者授權之工期清單暫排，未經承包商確認；日期含首尾日，不自動避開週末或假日。",
+        "status": "tentative",
+        "attendees": []
+      },
+      {
+        "id": "construction-masonry",
+        "title": "泥作施工",
+        "start": "2026-11-16",
+        "end": "2026-12-11",
+        "note": "依使用者授權之工期清單暫排，未經承包商確認；日期含首尾日，不自動避開週末或假日。",
+        "status": "tentative",
+        "attendees": []
+      },
+      {
+        "id": "construction-ceiling",
+        "title": "輕隔間及天花板",
+        "start": "2026-12-14",
+        "end": "2026-12-18",
+        "note": "依使用者授權之工期清單暫排，未經承包商確認；日期含首尾日，不自動避開週末或假日。",
+        "status": "tentative",
+        "attendees": []
+      },
+      {
+        "id": "construction-paint",
+        "title": "油漆施工",
+        "start": "2026-12-21",
+        "end": "2027-01-15",
+        "note": "依使用者授權之工期清單暫排，未經承包商確認；日期含首尾日，不自動避開週末或假日。",
+        "status": "tentative",
+        "attendees": []
+      },
+      {
+        "id": "construction-cabinets",
+        "title": "廚具.系統櫃體安裝",
+        "start": "2027-01-18",
+        "end": "2027-01-23",
+        "note": "依使用者授權之工期清單暫排，未經承包商確認；日期含首尾日，不自動避開週末或假日。",
+        "status": "tentative",
+        "attendees": []
+      },
+      {
+        "id": "construction-owner-install",
+        "title": "水電自備項目安裝(燈具.衛浴設備等)",
+        "start": "2027-01-25",
+        "end": "2027-01-27",
+        "note": "依使用者授權之工期清單暫排，未經承包商確認；日期含首尾日，不自動避開週末或假日。",
+        "status": "tentative",
+        "attendees": []
+      },
+      {
+        "id": "construction-clean",
+        "title": "全室清潔",
+        "start": "2027-01-28",
+        "end": "2027-01-29",
+        "note": "依使用者授權之工期清單暫排，未經承包商確認；日期含首尾日，不自動避開週末或假日。",
+        "status": "tentative",
+        "attendees": []
+      },
+      {
+        "id": "construction-handover",
+        "title": "油漆最終收尾及完工點交",
+        "start": "2027-01-30",
+        "end": "2027-01-30",
+        "note": "依使用者授權之工期清單暫排，未經承包商確認；日期含首尾日，不自動避開週末或假日。使用者指定 1 月 30 日單日暫排里程碑，實際完工日期仍待確認。",
+        "status": "tentative",
+        "attendees": []
+      }
+    ],
+    "undo": [
+      {
+        "id": "construction-start",
+        "title": "開工.拆除確認",
+        "start": "2026-10-09",
+        "end": "2026-10-09",
+        "note": "依使用者授權之工期清單暫排，未經承包商確認；日期含首尾日，不自動避開週末或假日。",
+        "status": "tentative",
+        "attendees": [
+          "屋主",
+          "輕隔間廠商代表"
+        ]
+      },
+      {
+        "id": "construction-demolition",
+        "title": "拆除施工",
+        "start": "2026-10-13",
+        "end": "2026-10-16",
+        "note": "依使用者授權之工期清單暫排，未經承包商確認；日期含首尾日，不自動避開週末或假日。",
+        "status": "tentative",
+        "attendees": []
+      },
+      {
+        "id": "construction-layout",
+        "title": "水電放樣",
+        "start": "2026-10-17",
+        "end": "2026-10-17",
+        "note": "依使用者授權之工期清單暫排，未經承包商確認；日期含首尾日，不自動避開週末或假日。",
+        "status": "tentative",
+        "attendees": [
+          "屋主",
+          "廚房工人",
+          "系統櫃工人"
+        ]
+      },
+      {
+        "id": "construction-wall",
+        "title": "輕隔間隔單面牆",
+        "start": "2026-10-17",
+        "end": "2026-10-17",
+        "note": "依使用者授權之工期清單暫排，未經承包商確認；日期含首尾日，不自動避開週末或假日。",
+        "status": "tentative",
+        "attendees": []
+      },
+      {
+        "id": "construction-utilities",
+        "title": "水電施工",
+        "start": "2026-10-19",
+        "end": "2026-11-13",
+        "note": "依使用者授權之工期清單暫排，未經承包商確認；日期含首尾日，不自動避開週末或假日。",
+        "status": "tentative",
+        "attendees": []
+      },
+      {
+        "id": "construction-masonry",
+        "title": "泥作施工",
+        "start": "2026-11-16",
+        "end": "2026-12-11",
+        "note": "依使用者授權之工期清單暫排，未經承包商確認；日期含首尾日，不自動避開週末或假日。",
+        "status": "tentative",
+        "attendees": []
+      },
+      {
+        "id": "construction-ceiling",
+        "title": "輕隔間及天花板",
+        "start": "2026-12-14",
+        "end": "2026-12-18",
+        "note": "依使用者授權之工期清單暫排，未經承包商確認；日期含首尾日，不自動避開週末或假日。",
+        "status": "tentative",
+        "attendees": []
+      },
+      {
+        "id": "construction-paint",
+        "title": "油漆施工",
+        "start": "2026-12-21",
+        "end": "2027-01-15",
+        "note": "依使用者授權之工期清單暫排，未經承包商確認；日期含首尾日，不自動避開週末或假日。",
+        "status": "tentative",
+        "attendees": []
+      },
+      {
+        "id": "construction-cabinets",
+        "title": "廚具.系統櫃體安裝",
+        "start": "2027-01-18",
+        "end": "2027-01-23",
+        "note": "依使用者授權之工期清單暫排，未經承包商確認；日期含首尾日，不自動避開週末或假日。",
+        "status": "tentative",
+        "attendees": []
+      },
+      {
+        "id": "construction-owner-install",
+        "title": "水電自備項目安裝(燈具.衛浴設備等)",
+        "start": "2027-01-25",
+        "end": "2027-01-27",
+        "note": "依使用者授權之工期清單暫排，未經承包商確認；日期含首尾日，不自動避開週末或假日。",
+        "status": "tentative",
+        "attendees": []
+      },
+      {
+        "id": "construction-clean",
+        "title": "全室清潔",
+        "start": "2027-01-28",
+        "end": "2027-01-29",
+        "note": "依使用者授權之工期清單暫排，未經承包商確認；日期含首尾日，不自動避開週末或假日。",
+        "status": "tentative",
+        "attendees": []
+      },
+      {
+        "id": "construction-handover",
+        "title": "油漆最終收尾及完工點交",
+        "start": "2027-01-30",
+        "end": "2027-01-30",
+        "note": "依使用者授權之工期清單暫排，未經承包商確認；日期含首尾日，不自動避開週末或假日。使用者指定 1 月 30 日單日暫排里程碑，實際完工日期仍待確認。",
+        "status": "tentative",
+        "attendees": []
+      }
+    ]
+  }
 }

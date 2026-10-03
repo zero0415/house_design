@@ -9,6 +9,9 @@ import {
     allocatedTrackDefinition, guardDoorAllocationUpdate, validateDoorAllocation,
 } from "./assets/door-allocation.js";
 import { guardRobotPlanUpdate, isPlannedRobot } from "./assets/robot-plan.js";
+import {
+    calendarFields, guardCalendarUpdate, hasCalendar, validateCalendar,
+} from "./assets/construction-calendar.js";
 import { ROOM_DRAWING_DIMENSIONS } from "./assets/house-geometry.js";
 import { DOOR_OPTIONS } from "./assets/door-options.js";
 import { QUOTED_SLIDE_TRACKS, SLIDE_TRACK_RATE_TWD } from "./assets/slide-tracks.js";
@@ -1498,6 +1501,15 @@ export function validateState(data) {
         });
         undo = { rooms: previous.rooms, items: previous.items, products: previous.products };
     }
+    let constructionCalendar;
+    if (hasCalendar(data)) {
+        try {
+            constructionCalendar = validateCalendar(data.constructionCalendar);
+        } catch (error) {
+            if (!(error instanceof TypeError)) throw error;
+            throw new StoreError(400, error.message);
+        }
+    }
     return {
         version: PLANNER_STATE_VERSION,
         revision: data.revision,
@@ -1506,6 +1518,7 @@ export function validateState(data) {
         items,
         products,
         undo,
+        ...(constructionCalendar ? { constructionCalendar } : {}),
     };
 }
 
@@ -1564,6 +1577,7 @@ export function createStore(filePath) {
                 guardControlRelationsUpdate(current, candidate);
                 guardDoorAllocationUpdate(current, candidate);
                 guardRobotPlanUpdate(current, candidate);
+                guardCalendarUpdate(current, candidate);
             } catch (error) {
                 if (!(error instanceof TypeError)) throw error;
                 throw new StoreError(400, error.message);
@@ -1576,6 +1590,7 @@ export function createStore(filePath) {
                 items: candidate?.items,
                 products: candidate?.products,
                 undo: candidate?.undo ?? null,
+                ...calendarFields(candidate),
             });
             for (const product of current.products) {
                 const replacement = next.products.find((entry) => entry.id === product.id);

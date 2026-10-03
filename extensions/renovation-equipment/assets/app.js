@@ -52,6 +52,11 @@ import {
 } from "./door-allocation.js";
 import { isPlannedRobot, renderRobotCaution } from "./robot-plan.js";
 import {
+    calendarFields, hasCalendar, importCalendarAttendees,
+    upgradeCalendarAttendees,
+} from "./construction-calendar.js";
+import { bindCalendar, calendarUI, renderCalendar } from "./calendar-view.js";
+import {
     BEDROOM2_PARTITION_ID, BEDROOM2_PARTITION_OPTIONS, BEDROOM2_PARTITION_QUOTED_AREA,
 } from "./partition-options.js";
 import {
@@ -101,6 +106,7 @@ const currencySymbols = { TWD: "NT$", JPY: "¥", USD: "US$" };
 
 let state;
 let view = "plan";
+const calendarUi = calendarUI();
 let controlSwitchId = null;
 let showSourceOverlay = false;
 let lightingPreview = false;
@@ -218,9 +224,11 @@ function stateSnapshot(source = state) {
 }
 
 function updateUndoButton() {
-    undoButton.disabled = !state?.undo || conflicted || undoing;
-    content.inert = undoing;
-    toolbar.inert = undoing;
+    undoButton.disabled = !state?.undo || conflicted || undoing || calendarUi.busy;
+    undoButton.textContent = view === "calendar"
+        ? "還原設備上一步（非日曆）" : "↶ 還原上一步";
+    content.inert = undoing || calendarUi.busy;
+    toolbar.inert = undoing || calendarUi.busy;
 }
 
 function resetActionTracking() {
@@ -3013,18 +3021,28 @@ function render() {
         const sheetView = view === "outlet-sheet" || view === "lighting-sheet";
         content.setAttribute("aria-labelledby", `view-${view}`);
         document.querySelector("#add-item").hidden =
-            view === "survey" || view === "database" || sheetView;
+            view === "survey" || view === "database" ||
+            view === "calendar" || sheetView;
         document.querySelector("#save-file").disabled = false;
         document.querySelector("#export-items").disabled = false;
         document.querySelector("#download-portable").hidden = isPortableMode();
         document.querySelector("#portable-note").hidden = !isPortableMode();
-        content.innerHTML = (pendingNewItem && !sheetView && view !== "survey" &&
+        content.innerHTML = (pendingNewItem && !sheetView && view !== "calendar" &&
+            view !== "survey" &&
             view !== "database" ? renderNewItemForm() : "") +
-            (sheetView ? renderElectricalSheet(state, view, controlSwitchId)
+            (view === "calendar"
+                ? renderCalendar(state.constructionCalendar, calendarUi)
+            : sheetView ? renderElectricalSheet(state, view, controlSwitchId)
             : view === "survey" ? renderSurvey(survey, state.rooms)
             : view === "plan" ? renderPlanView()
                 : view === "room" ? renderRoomView()
                     : view === "database" ? renderDatabaseView() : renderDeviceView());
+        if (view === "calendar") {
+            bindCalendar(content.querySelector(".construction-calendar"),
+                state.constructionCalendar, calendarUi, {
+                    render, save: saveCalendar, report: setStatus,
+                });
+        }
         renderTotals();
     } finally {
         rendering = false;
@@ -3481,6 +3499,7 @@ async function save() {
         items: state.items,
         products: state.products,
         undo: state.undo ?? null,
+        ...calendarFields(state),
     };
     let finishSave;
     saveFinished = new Promise((resolve) => { finishSave = resolve; });
@@ -3522,6 +3541,42 @@ async function save() {
     }
 }
 
+async function saveCalendar(constructionCalendar) {
+    if (invalidInputs.size || conflicted || undoing) {
+        throw new Error(
+            "請先處理設備欄位錯誤或版本衝突，行事曆表單已保留。"
+        );
+    }
+    toolbar.inert = true;
+    try {
+        if (saving) await saveFinished;
+        if (dirty) await save();
+        if (dirty || conflicted) {
+            throw new Error("設備變更尚未安全儲存，未寫入行事曆。");
+        }
+        const result = await writePlannerState({
+            version: PLANNER_STATE_VERSION,
+            expectedRevision: state.revision,
+            rooms: state.rooms,
+            items: state.items,
+            products: state.products,
+            undo: state.undo,
+            constructionCalendar,
+        });
+        state = { ...result, products: result.products ?? [] };
+        dirty = Boolean(result.storageWarning);
+        resetActionTracking();
+        if (result.storageWarning) throw new Error(result.storageWarning);
+        setStatus("已儲存行事曆；設備與設備上一步未變。", "saved");
+    } catch (error) {
+        conflicted = Boolean(error.conflict) || conflicted;
+        reloadButton.hidden = !conflicted;
+        throw error;
+    } finally {
+        toolbar.inert = false;
+    }
+}
+
 async function undoLastChange() {
     if (!state?.undo || undoing) {
         setStatus("目前沒有可還原的上一筆資料變更。", "error");
@@ -3560,6 +3615,7 @@ async function undoLastChange() {
             items: previous.items,
             products: previous.products,
             undo: null,
+            ...calendarFields(state),
         });
         state = { ...result, products: result.products ?? [] };
         dirty = Boolean(result.storageWarning);
@@ -5388,7 +5444,7 @@ function datedFileName(extension) {
 }
 
 async function downloadSave() {
-    if (!state || invalidInputs.size || conflicted || saving) {
+    if (!state || invalidInputs.size || conflicted || saving || calendarUi.busy) {
         setStatus("請先載入清單，修正無效輸入或等待儲存／版本衝突處理後再存檔。", "error");
         return;
     }
@@ -5436,8 +5492,8 @@ function downloadItemList() {
 
 async function loadSave(file) {
     if (!file) return;
-    if (saving || file.size > MAX_SAVE_BYTES) {
-        setStatus(saving ? "目前正在儲存，請稍後再讀檔。" :
+    if (saving || calendarUi.busy || file.size > MAX_SAVE_BYTES) {
+        setStatus(saving || calendarUi.busy ? "目前正在儲存，請稍後再讀檔。" :
             "JSON 存檔超過 4 MB，未改動目前規劃。", "error");
         return;
     }
@@ -5452,9 +5508,27 @@ async function loadSave(file) {
     const roomCount = imported.rooms.length;
     if (!window.confirm(`讀檔將以「${file.name}」的 ${roomCount} 間房、` +
         `${itemCount} 筆物件及 ${imported.products.length} 款商品，` +
-        "取代目前畫布的全部規劃（包含未儲存的變更）。確定嗎？")) return;
+        "取代目前畫布規劃（包含未儲存的工項表單）。舊檔未附行事曆時保留現有行事曆；" +
+        "附有行事曆則取代並保留日曆獨立復原。舊版行事曆未含出席角色時，" +
+        "保留相同工項 ID 的現有角色，其他工項未指定。確定嗎？")) return;
     clearTimeout(saveTimer);
-    const prior = state ? stateSnapshot() : imported.undo ?? null;
+    const calendarOnly = state && hasCalendar(imported) &&
+        JSON.stringify(stateSnapshot(imported)) === JSON.stringify(stateSnapshot());
+    const prior = state ? calendarOnly ? state.undo : stateSnapshot() :
+        imported.undo ?? null;
+    const importedCalendar = hasCalendar(imported)
+        ? {
+            constructionCalendar: importCalendarAttendees(
+                state?.constructionCalendar, imported.constructionCalendar),
+        } : calendarFields(state);
+    if (hasCalendar(imported) && hasCalendar(state) &&
+        JSON.stringify(imported.constructionCalendar.events) !==
+            JSON.stringify(state.constructionCalendar.events)) {
+        importedCalendar.constructionCalendar.undo =
+            importedCalendar.constructionCalendar.version === 2
+                ? upgradeCalendarAttendees(state.constructionCalendar).events
+                : structuredClone(state.constructionCalendar.events);
+    }
     try {
         const updated = await writePlannerState({
             version: PLANNER_STATE_VERSION,
@@ -5464,8 +5538,10 @@ async function loadSave(file) {
             items: imported.items,
             products: imported.products,
             undo: prior,
+            ...importedCalendar,
         });
         state = { ...updated, products: updated.products ?? [] };
+        Object.assign(calendarUi, calendarUI());
         resetActionTracking();
         dirty = Boolean(updated.storageWarning);
         conflicted = false;
@@ -5515,9 +5591,13 @@ document.querySelector("#load-file-input").addEventListener("change", (event) =>
     if (file) void loadSave(file);
 });
 reloadButton.addEventListener("click", async () => {
-    if (dirty && !window.confirm("重新載入會捨棄尚未儲存的變更，確定嗎？")) return;
+    if ((dirty || calendarUi.changed) &&
+        !window.confirm(
+            "重新載入會捨棄尚未儲存的設備變更與工項表單，確定嗎？"
+        )) return;
     try {
         state = await fetchState();
+        Object.assign(calendarUi, calendarUI());
         resetActionTracking();
         dirty = false;
         conflicted = false;
@@ -5576,11 +5656,13 @@ window.addEventListener("keydown", (event) => {
         event.key.toLowerCase() !== "z" ||
         event.target?.closest?.("input, textarea, select, [contenteditable]")) return;
     event.preventDefault();
-    void undoLastChange();
+    if (view === "calendar") {
+        content.querySelector("[data-calendar-undo]:not(:disabled)")?.click();
+    } else void undoLastChange();
 });
 
 window.addEventListener("beforeunload", (event) => {
-    if (dirty || saving || undoing) {
+    if (dirty || saving || undoing || calendarUi.changed || calendarUi.busy) {
         event.preventDefault();
         event.returnValue = "";
     }
@@ -5588,7 +5670,7 @@ window.addEventListener("beforeunload", (event) => {
 
 async function refreshIfClean() {
     if (!state || dirty || saving || conflicted || pendingProduct ||
-        furnitureDrag || outdoorDrag) return;
+        calendarUi.draft || calendarUi.busy || furnitureDrag || outdoorDrag) return;
     try {
         const latest = await fetchState();
         if (latest.revision > state.revision) {

@@ -23,6 +23,8 @@ import { linkedProductMismatch } from
 import {
     createStore, StoreError, summarize, validateState,
 } from "../extensions/renovation-equipment/state.mjs";
+import { calendarFields } from
+    "../extensions/renovation-equipment/assets/construction-calendar.js";
 import { ROBOT_ID } from
     "../extensions/renovation-equipment/assets/robot-plan.js";
 
@@ -263,6 +265,7 @@ test("store retains one full Undo and rejects stale revision; sample itself has 
         const reviewed = migrateBalconySwap(latest).state;
         const capabilities = {
             controlRelationsVersion: 1, doorAllocationVersion: 1,
+            calendarFeatureVersion: 1, calendarAttendeesVersion: 1,
         };
         const written = await store.update(latest.revision, {
             ...reviewed, ...capabilities,
@@ -275,9 +278,12 @@ test("store retains one full Undo and rejects stale revision; sample itself has 
         }),
             (error) => error instanceof StoreError && error.status === 409);
         const undone = await store.update(written.revision, {
-            version: 5, ...written.undo, undo: null, ...capabilities,
+            version: 5, ...written.undo, undo: null,
+            ...calendarFields(written), ...capabilities,
         });
         assert.deepEqual(snapshot(undone), snapshot(latest));
+        assert.deepEqual(undone.constructionCalendar,
+            latest.constructionCalendar);
         assert.equal(sample.undo, null);
     } finally {
         await rm(directory, { recursive: true, force: true });

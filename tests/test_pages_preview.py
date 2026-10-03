@@ -41,9 +41,27 @@ INCLUDED_BATHROOM_IDS = {
 
 def previous_public_robot_save():
     state = json.loads(SAMPLE.read_text(encoding="utf-8"))
+    assert "constructionCalendar" in state
+    del state["constructionCalendar"]
     state["items"] = [item for item in state["items"]
                       if item["id"] != "living-auto-water-robot"]
     assert len(state["items"]) == 181
+    return state
+
+
+def previous_public_calendar_save():
+    state = json.loads(SAMPLE.read_text(encoding="utf-8"))
+    calendar = state["constructionCalendar"]
+    assert calendar["version"] == 2 and len(calendar["events"]) == 13
+    calendar["version"] = 1
+    calendar["events"] = [
+        {key: value for key, value in event.items()
+         if key != "attendees"} for event in calendar["events"]
+        if event["id"] != "construction-elevator-protection"
+    ]
+    calendar["undo"] = []
+    assert len(calendar["events"]) == 12
+    assert len(state["items"]) == 182
     return state
 
 
@@ -204,6 +222,664 @@ class PagesPreviewTests(unittest.TestCase):
             timeout=15000,
         )
 
+    def test_calendar_tab_is_rightmost_with_keyboard_navigation(self):
+        context = self.browser.new_context(viewport={"width": 390, "height": 844})
+        try:
+            page = context.new_page()
+            requests = []
+            errors = []
+            page.on("request", lambda request: requests.append(
+                (request.method, request.url)) if request.url.startswith(
+                    ("http:", "https:")) else None)
+            page.on("pageerror", lambda error: errors.append(str(error)))
+            self.open_demo(page)
+            tabs = page.get_by_role("tab")
+            self.assertEqual(tabs.evaluate_all(
+                "nodes => nodes.map(node => node.dataset.view)"), [
+                "plan", "outlet-sheet", "lighting-sheet", "survey",
+                "room", "database", "device", "calendar",
+            ])
+            before = page.evaluate("globalThis.__RENOVATION_OFFLINE_STORE__.read()")
+            plan = page.locator('[data-view="plan"]')
+            device = page.locator('[data-view="device"]')
+            calendar = page.locator('[data-view="calendar"]')
+            plan.focus()
+            plan.press("End")
+            self.assertEqual(calendar.get_attribute("aria-selected"), "true")
+            self.assertTrue(calendar.evaluate(
+                "element => document.activeElement === element"))
+            self.assertEqual(page.locator("#content").get_attribute(
+                "aria-labelledby"), "view-calendar")
+            calendar.press("Home")
+            self.assertEqual(plan.get_attribute("aria-selected"), "true")
+            device.focus()
+            device.press("ArrowRight")
+            self.assertEqual(calendar.get_attribute("aria-selected"), "true")
+            calendar.press("ArrowRight")
+            self.assertEqual(plan.get_attribute("aria-selected"), "true")
+            calendar.focus()
+            calendar.press("Space")
+            self.assertEqual(calendar.get_attribute("aria-selected"), "true")
+            self.assertEqual(page.locator(".calendar-agenda li").count(), 13)
+            self.assertEqual(page.evaluate(
+                "globalThis.__RENOVATION_OFFLINE_STORE__.read()"), before)
+            self.assertEqual(page.evaluate(
+                "document.documentElement.scrollWidth <= 391"), True)
+            self.assertTrue(all(method == "GET" and url.startswith(self.base)
+                                for method, url in requests), requests)
+            self.assertEqual(len([url for _, url in requests
+                                  if "/files/" in url]), 1)
+            self.assertEqual(errors, [])
+        finally:
+            context.close()
+
+    def test_calendar_expanded_sundays_and_role_bars_keep_pristine_state(self):
+        context = self.browser.new_context(
+            viewport={"width": 1280, "height": 960},
+            accept_downloads=True,
+        )
+        artifacts = os.environ.get("PUBLIC_CALENDAR_ARTIFACTS")
+        if artifacts:
+            Path(artifacts).mkdir(parents=True, exist_ok=True)
+        try:
+            page = context.new_page()
+            errors, requests = [], []
+            page.on("pageerror", lambda error: errors.append(str(error)))
+            page.on("request", lambda request: requests.append(
+                (request.method, request.url)) if request.url.startswith(
+                    ("http:", "https:")) else None)
+            self.open_demo(page)
+            page.get_by_role("tab", name="開工行事曆", exact=True).click()
+            pristine = page.evaluate(
+                "globalThis.__RENOVATION_OFFLINE_STORE__.read()")
+            self.assertEqual((pristine["revision"],
+                              len(pristine["constructionCalendar"]["events"])),
+                             (0, 13))
+            cache_before = page.evaluate("JSON.stringify(localStorage)")
+            page.evaluate("""() => {
+                window.__calendarViewWrites = [];
+                const setItem = Storage.prototype.setItem;
+                Storage.prototype.setItem = function(...args) {
+                    window.__calendarViewWrites.push(args[0]);
+                    return setItem.apply(this, args);
+                };
+                const store = globalThis.__RENOVATION_OFFLINE_STORE__;
+                const update = store.update;
+                store.update = function(...args) {
+                    window.__calendarViewWrites.push('store.update');
+                    return update.apply(this, args);
+                };
+            }""")
+            self.assertEqual(page.locator(
+                "[data-calendar-month-view]").count(), 1)
+            page.locator("[data-calendar-expand]").click()
+            sections = page.locator("[data-calendar-month-view]")
+            self.assertEqual(sections.evaluate_all(
+                "nodes => nodes.map(node => node.dataset.calendarMonthView)"),
+                ["2026-10", "2026-11", "2026-12", "2027-01"])
+            self.assertEqual(sections.count(), 4)
+            self.assertEqual(page.locator(".calendar-scroll").count(), 4)
+            self.assertTrue(page.locator(".calendar-range").is_visible())
+            self.assertIn("2026-10～2027-01",
+                          page.locator(".calendar-range").inner_text())
+            positions = sections.evaluate_all(
+                "nodes => nodes.map(node => node.getBoundingClientRect().top)")
+            self.assertEqual(positions, sorted(positions))
+            self.assertEqual(len(set(positions)), 4)
+            october = page.locator('[data-calendar-month-view="2026-10"]')
+            november = page.locator('[data-calendar-month-view="2026-11"]')
+            for sunday, monday, month in (
+                ("2026-10-25", "2026-10-26", october),
+                ("2026-11-01", "2026-11-02", november),
+                ("2026-11-08", "2026-11-09", november),
+            ):
+                week = month.locator(
+                    f'.calendar-week:has([data-calendar-date="{sunday}"])')
+                self.assertIn("師傅固定休假", week.locator(
+                    ".calendar-sunday-rest").first.inner_text())
+                segment = week.locator(
+                    '[data-calendar-event="construction-utilities"]')
+                self.assertEqual(segment.count(), 1)
+                self.assertEqual(segment.get_attribute("data-segment-start"),
+                                 monday)
+                self.assertEqual(segment.evaluate(
+                    "node => getComputedStyle(node).gridColumnStart"), "2")
+            self.assertIn("師傅固定休假", october.locator(
+                '.calendar-week:has([data-calendar-date="2026-09-27"])'
+                ' .calendar-sunday-rest').first.inner_text())
+            kickoff = october.locator(
+                '.calendar-event[data-calendar-event="construction-start"]')
+            layout = october.locator(
+                '.calendar-event[data-calendar-event="construction-layout"]')
+            wall = october.locator(
+                '.calendar-event[data-calendar-event="construction-wall"]')
+            self.assertEqual(kickoff.locator(
+                ".calendar-event-roles .calendar-role").all_inner_texts(),
+                ["屋主", "輕隔間廠商代表"])
+            self.assertEqual(layout.locator(
+                ".calendar-event-roles .calendar-role").all_inner_texts(),
+                ["屋主", "廚房工人", "系統櫃工人"])
+            for bar in (kickoff, layout):
+                self.assertEqual(bar.locator(
+                    ".calendar-owner .calendar-person-icon"
+                    '[aria-hidden="true"]').count(), 1)
+            oct13 = october.locator(
+                '.calendar-week:has([data-calendar-date="2026-10-13"])')
+            self.assertNotEqual(oct13.locator(
+                '[data-calendar-event="construction-demolition"]').evaluate(
+                    "node => getComputedStyle(node).gridRowStart"),
+                oct13.locator(
+                    '[data-calendar-event="construction-elevator-protection"]'
+                ).evaluate("node => getComputedStyle(node).gridRowStart"))
+            october.locator('[data-calendar-date="2026-10-31"]').focus()
+            october.locator('[data-calendar-date="2026-10-31"]').press(
+                "ArrowRight")
+            self.assertTrue(november.locator(
+                '[data-calendar-date="2026-11-01"]').first.evaluate(
+                    "node => document.activeElement === node"))
+            last = page.locator(
+                '[data-calendar-month-view="2027-01"] '
+                '[data-calendar-date="2027-02-06"]')
+            last.focus()
+            last.press("ArrowRight")
+            self.assertTrue(last.evaluate(
+                "node => document.activeElement === node"))
+            if artifacts:
+                page.locator("#calendar-month-views").screenshot(
+                    path=str(Path(artifacts) /
+                             "pristine-chrome-four-months-1280.png"))
+            for width in (320, 360, 390, 430):
+                page.set_viewport_size({"width": width, "height": 900})
+                self.assertLessEqual(page.evaluate(
+                    "document.documentElement.scrollWidth - innerWidth"), 1,
+                    f"body overflow at {width}px")
+                grids = page.locator(".calendar-scroll").evaluate_all(
+                    """nodes => nodes.map(node => ({
+                        width: node.clientWidth, scroll: node.scrollWidth
+                    }))""")
+                self.assertEqual(len(grids), 4)
+                self.assertTrue(all(grid["width"] <= width and
+                                    grid["scroll"] > grid["width"]
+                                    for grid in grids), (width, grids))
+                page.locator(".calendar-scroll").evaluate_all(
+                    "nodes => nodes.forEach(node => node.scrollLeft = 0)")
+                october.locator(".calendar-scroll").evaluate(
+                    "node => node.scrollLeft = 140")
+                self.assertGreater(october.locator(
+                    ".calendar-scroll").evaluate("node => node.scrollLeft"), 0)
+                self.assertEqual(november.locator(
+                    ".calendar-scroll").evaluate("node => node.scrollLeft"), 0)
+                for bar, expected in (
+                    (kickoff, ["屋主", "輕隔間廠商代表"]),
+                    (layout, ["屋主", "廚房工人", "系統櫃工人"]),
+                ):
+                    bar.scroll_into_view_if_needed()
+                    geometry = bar.evaluate("""node => {
+                        const rect = element => {
+                            const box = element.getBoundingClientRect();
+                            return {left: box.left, right: box.right,
+                                top: box.top, bottom: box.bottom,
+                                width: box.width, height: box.height};
+                        };
+                        return {
+                            bar: rect(node),
+                            scroll: rect(node.closest('.calendar-scroll')),
+                            labels: [...node.querySelectorAll(
+                                '.calendar-event-roles .calendar-role'
+                            )].map(role => {
+                                const text = [...role.childNodes].find(child =>
+                                    child.nodeType === Node.TEXT_NODE &&
+                                    child.textContent.trim());
+                                const range = document.createRange();
+                                range.selectNodeContents(text);
+                                return {name: role.textContent.trim(),
+                                    font: parseFloat(
+                                        getComputedStyle(role).fontSize),
+                                    pill: rect(role),
+                                    ink: [...range.getClientRects()].map(box =>
+                                        ({left: box.left, right: box.right,
+                                            top: box.top,
+                                            bottom: box.bottom}))};
+                            })
+                        };
+                    }""")
+                    self.assertEqual(
+                        [role["name"] for role in geometry["labels"]],
+                        expected)
+                    self.assertGreater(geometry["bar"]["height"], 30)
+                    for role in geometry["labels"]:
+                        self.assertGreaterEqual(role["font"], 12)
+                        self.assertTrue(role["ink"])
+                        for ink in role["ink"]:
+                            for outer in (role["pill"], geometry["bar"]):
+                                self.assertGreaterEqual(
+                                    ink["left"], outer["left"] - 2,
+                                    (width, role, geometry))
+                                self.assertLessEqual(
+                                    ink["right"], outer["right"] + 2,
+                                    (width, role, geometry))
+                                self.assertGreaterEqual(
+                                    ink["top"], outer["top"] - 2,
+                                    (width, role, geometry))
+                                self.assertLessEqual(
+                                    ink["bottom"], outer["bottom"] + 2,
+                                    (width, role, geometry))
+                    self.assertGreaterEqual(
+                        geometry["bar"]["left"],
+                        geometry["scroll"]["left"] - 1)
+                    self.assertLessEqual(
+                        geometry["bar"]["right"],
+                        geometry["scroll"]["right"] + 1)
+                    if artifacts and width in (320, 390):
+                        name = "oct09" if bar == kickoff else "oct17"
+                        bar.screenshot(path=str(Path(artifacts) /
+                                                f"pristine-chrome-{name}-{width}-bar.png"))
+                        page.screenshot(path=str(Path(artifacts) /
+                                                 f"pristine-chrome-{name}-{width}-viewport.png"))
+                first, second = layout.bounding_box(), wall.bounding_box()
+                self.assertTrue(
+                    first["y"] + first["height"] <= second["y"] + 1 or
+                    second["y"] + second["height"] <= first["y"] + 1,
+                    (width, first, second))
+                if artifacts and width == 390:
+                    page.locator(".calendar-scroll").evaluate_all(
+                        "nodes => nodes.forEach(node => node.scrollLeft = 0)")
+                    page.locator("#calendar-month-views").screenshot(
+                        path=str(Path(artifacts) /
+                                 "pristine-chrome-four-months-390.png"))
+            self.assertEqual(page.evaluate(
+                "globalThis.__RENOVATION_OFFLINE_STORE__.read()"), pristine)
+            self.assertEqual(page.evaluate("JSON.stringify(localStorage)"),
+                             cache_before)
+            self.assertEqual(page.evaluate("window.__calendarViewWrites"), [])
+            self.assertTrue(all(method == "GET" for method, _ in requests),
+                            requests)
+            self.assertEqual(errors, [])
+            page.locator("[data-calendar-expand]").click()
+            self.assertEqual(page.locator(
+                "[data-calendar-month-view]").count(), 1)
+            self.assertEqual(page.evaluate(
+                "globalThis.__RENOVATION_OFFLINE_STORE__.read()"), pristine)
+
+            page.locator("[data-calendar-month-input]").fill("2026-10")
+            page.locator('[data-calendar-date="2026-10-25"]').click()
+            editor = page.locator("[data-calendar-form]")
+            editor.locator('[name="title"]').fill("臨時週日作業")
+            editor.get_by_role("button", name="儲存工項").click()
+            page.wait_for_function("""async () => {
+                const state = await globalThis.__RENOVATION_OFFLINE_STORE__.read();
+                return state.constructionCalendar.events.some(event =>
+                    event.title === '臨時週日作業');
+            }""")
+            exception = page.locator(
+                '.calendar-event:has(.calendar-sunday-exception)')
+            self.assertEqual(exception.count(), 1)
+            self.assertIn("週日例外安排", exception.inner_text())
+            self.assertEqual(exception.get_attribute("data-segment-start"),
+                             "2026-10-25")
+            after = page.evaluate(
+                "globalThis.__RENOVATION_OFFLINE_STORE__.read()")
+            self.assertEqual((after["rooms"], after["items"],
+                              after["products"], after["undo"]),
+                             (pristine["rooms"], pristine["items"],
+                              pristine["products"], pristine["undo"]))
+            self.assertEqual(page.locator("#overall-total").inner_text(),
+                             "NT$2,322,060.2")
+            self.assertEqual(errors, [])
+        finally:
+            context.close()
+
+    def test_calendar_attendees_are_role_only_editable_and_keep_equipment_undo(self):
+        context = self.browser.new_context(
+            viewport={"width": 390, "height": 844},
+            accept_downloads=True,
+        )
+        try:
+            page = context.new_page()
+            errors, requests = [], []
+            page.on("pageerror", lambda error: errors.append(str(error)))
+            page.on("request", lambda request: requests.append(
+                (request.method, request.url))
+                if request.url.startswith(("http:", "https:")) else None)
+            page.on("dialog", lambda dialog: dialog.accept())
+            self.open_demo(page)
+            initial = page.evaluate("globalThis.__RENOVATION_OFFLINE_STORE__.read()")
+            self.assertEqual((initial["version"], initial["revision"],
+                              initial["undo"]), (5, 0, None))
+            self.assertEqual((len(initial["items"]),
+                              initial["constructionCalendar"]["version"],
+                              len(initial["constructionCalendar"]["events"])),
+                             (182, 2, 13))
+            calendar = initial["constructionCalendar"]
+            start = next(event for event in calendar["events"]
+                         if event["id"] == "construction-start")
+            self.assertEqual(start["attendees"],
+                             ["屋主", "輕隔間廠商代表"])
+            layout = next(event for event in calendar["events"] if event["id"] ==
+                          "construction-layout")
+            self.assertEqual(layout["attendees"],
+                             ["屋主", "廚房工人", "系統櫃工人"])
+            self.assertEqual(sum(not entry["attendees"] for entry in
+                                 calendar["events"]), 11)
+            self.assertEqual(page.locator("#overall-total").inner_text(),
+                             "NT$2,322,060.2")
+            budget = page.locator(".budget").inner_text()
+            page.get_by_role("tab", name="開工行事曆", exact=True).click()
+            self.assertEqual(page.locator(".calendar-agenda li").count(), 13)
+            self.assertEqual(page.locator(
+                ".calendar-roles-empty").count(), 11)
+            start_agenda = page.locator(
+                '.calendar-agenda li:has([data-calendar-event="construction-start"])'
+            )
+            self.assertEqual(start_agenda.locator(".calendar-role").count(), 2)
+            self.assertIn("輕隔間廠商代表", start_agenda.inner_text())
+            self.assertEqual(page.locator(
+                '.calendar-agenda li:has([data-calendar-event="construction-elevator-protection"]) '
+                '.calendar-roles-empty').count(), 1)
+            week = page.locator(
+                '.calendar-week:has([data-calendar-date="2026-10-13"])'
+            )
+            demolition_bar = week.locator(
+                '[data-calendar-event="construction-demolition"]'
+            )
+            elevator_bar = week.locator(
+                '[data-calendar-event="construction-elevator-protection"]'
+            )
+            self.assertEqual((demolition_bar.count(), elevator_bar.count()),
+                             (1, 1))
+            self.assertNotEqual(demolition_bar.evaluate(
+                "element => getComputedStyle(element).gridRowStart"),
+                elevator_bar.evaluate(
+                    "element => getComputedStyle(element).gridRowStart"))
+            agenda = page.locator(
+                '.calendar-agenda li:has([data-calendar-event="construction-layout"])'
+            )
+            self.assertEqual(agenda.locator(".calendar-role").count(), 3)
+            owner = agenda.locator(".calendar-owner")
+            self.assertEqual(owner.inner_text(), "屋主")
+            self.assertEqual(owner.locator('svg[aria-hidden="true"]').count(), 1)
+            self.assertIn("廚房工人", agenda.inner_text())
+            self.assertIn("系統櫃工人", agenda.inner_text())
+            self.assertIn("預計出席：", page.locator(
+                '[data-calendar-event="construction-layout"].calendar-event'
+            ).first.get_attribute("aria-label"))
+            self.assertIn("屋主、廚房工人、系統櫃工人", page.locator(
+                '[data-calendar-event="construction-layout"].calendar-event'
+            ).first.get_attribute("aria-label"))
+            self.assertEqual(page.evaluate(
+                "globalThis.__RENOVATION_OFFLINE_STORE__.read()"), initial)
+
+            agenda.locator('[data-calendar-event="construction-layout"]').click()
+            form = page.locator("[data-calendar-form]")
+            roles = form.locator('[name="attendees"]')
+            self.assertEqual(roles.input_value(), "屋主\n廚房工人\n系統櫃工人")
+            self.assertIn("非回覆或到場承諾",
+                          page.locator("#calendar-roles-help").inner_text())
+            roles.fill(f"屋主{chr(51)}人\n廚房工人")
+            form.get_by_role("button", name="儲存工項").click()
+            self.assertIn("不填人數", page.locator(".calendar-error").inner_text())
+            self.assertEqual(page.evaluate(
+                "globalThis.__RENOVATION_OFFLINE_STORE__.read()"), initial)
+            roles.fill("屋主\n廚房工人")
+            self.assertEqual(form.locator(
+                ".calendar-role-preview .calendar-role").count(), 2)
+            self.assertEqual(page.evaluate(
+                "globalThis.__RENOVATION_OFFLINE_STORE__.read()"), initial)
+            form.get_by_role("button", name="儲存工項").click()
+            page.wait_for_function("""async () => {
+                const state = await globalThis.__RENOVATION_OFFLINE_STORE__.read();
+                const event = state.constructionCalendar.events.find(entry =>
+                    entry.id === 'construction-layout');
+                return state.revision === 1 &&
+                    event.attendees.length === 2 &&
+                    state.constructionCalendar.undo?.length === 13;
+            }""", timeout=15000)
+            edited = page.evaluate(
+                "globalThis.__RENOVATION_OFFLINE_STORE__.read()"
+            )
+            self.assertIsNone(edited["undo"])
+            self.assertEqual(edited["items"], initial["items"])
+            self.assertEqual(edited["rooms"], initial["rooms"])
+            self.assertEqual(edited["products"], initial["products"])
+            self.assertEqual(page.locator("#overall-total").inner_text(),
+                             "NT$2,322,060.2")
+            self.assertEqual(page.locator(".budget").inner_text(), budget)
+            self.assertEqual(next(entry for entry in
+                                  edited["constructionCalendar"]["undo"]
+                                  if entry["id"] ==
+                                  "construction-layout")["attendees"],
+                             ["屋主", "廚房工人", "系統櫃工人"])
+            with page.expect_download() as download:
+                page.locator("[data-calendar-csv]").click()
+            csv = Path(download.value.path()).read_text(encoding="utf-8-sig")
+            self.assertIn("誰要出席（預計角色）", csv)
+            self.assertIn("屋主、廚房工人", csv)
+            self.assertNotRegex(csv, r"屋主[0-9]+人")
+            with page.expect_download() as download:
+                page.locator("#save-file").click()
+            exported = json.loads(Path(
+                download.value.path()).read_text(encoding="utf-8"))
+            self.assertEqual(exported["formatVersion"], 10)
+            self.assertEqual(exported["state"]["constructionCalendar"],
+                             edited["constructionCalendar"])
+            page.reload()
+            page.wait_for_function(
+                "Boolean(document.querySelector('.overview-svg'))",
+                timeout=15000,
+            )
+            self.assertEqual(page.evaluate(
+                "globalThis.__RENOVATION_OFFLINE_STORE__.read()"
+            )["constructionCalendar"], edited["constructionCalendar"])
+            page.get_by_role("tab", name="開工行事曆", exact=True).click()
+
+            prior = deepcopy(edited)
+            prior_calendar = prior["constructionCalendar"]
+            prior_calendar["version"] = 1
+            prior_calendar["events"] = [
+                {key: value for key, value in entry.items()
+                 if key != "attendees"} for entry in prior_calendar["events"]
+            ]
+            prior_calendar["undo"] = []
+            page.locator("#load-file-input").set_input_files({
+                "name": "older-public-calendar-v1.json",
+                "mimeType": "application/json",
+                "buffer": json.dumps({
+                    "format": "renovation-equipment-planner",
+                    "formatVersion": 9, "state": prior,
+                }, ensure_ascii=False).encode("utf-8"),
+            })
+            page.wait_for_function("""async () =>
+                (await globalThis.__RENOVATION_OFFLINE_STORE__.read())
+                    .revision === 2
+            """, timeout=15000)
+            imported = page.evaluate(
+                "globalThis.__RENOVATION_OFFLINE_STORE__.read()"
+            )
+            self.assertEqual(imported["constructionCalendar"]["version"], 2)
+            self.assertEqual(next(entry for entry in
+                                  imported["constructionCalendar"]["events"]
+                                  if entry["id"] ==
+                                  "construction-layout")["attendees"],
+                             ["屋主", "廚房工人"])
+            self.assertEqual(next(entry for entry in
+                                  imported["constructionCalendar"]["events"]
+                                  if entry["id"] ==
+                                  "construction-start")["attendees"],
+                             ["屋主", "輕隔間廠商代表"])
+            self.assertIsNone(imported["undo"])
+            self.assertEqual(imported["items"], initial["items"])
+            self.assertEqual(page.locator(".budget").inner_text(), budget)
+            self.assertTrue(all(method == "GET" and
+                                url.startswith(self.base) for method, url in
+                                requests), requests)
+            self.assertEqual(len([url for _, url in requests
+                                  if "/files/" in url]), 1)
+            self.assertEqual(errors, [])
+        finally:
+            context.close()
+
+    def test_old_local_saves_never_auto_seed_calendar(self):
+        controls = previous_public_door_save()
+        next(item for item in controls["items"] if item["id"] ==
+             "quoted-switch-01")["controlledLightIds"] = [
+                 "living-ceiling-light-01"
+             ]
+        robot = json.loads(SAMPLE.read_text(encoding="utf-8"))
+        del robot["constructionCalendar"]
+        cases = (
+            ("renovation-equipment-offline-v1", previous_public_balcony_save(),
+             179),
+            ("renovation-equipment-offline-controls-v1", controls, 180),
+            ("renovation-equipment-offline-doors-v1",
+             previous_public_robot_save(), 181),
+            ("renovation-equipment-offline-robot-v1", robot, 182),
+        )
+        for storage_key, saved, count in cases:
+            with self.subTest(storage_key=storage_key):
+                saved["revision"] = 7
+                context = self.browser.new_context(
+                    viewport={"width": 390, "height": 844}
+                )
+                try:
+                    context.add_init_script("""if (location.pathname.includes('/portable/')) {
+                        localStorage.setItem(%s + ':' + location.pathname, %s);
+                    }""" % (
+                        json.dumps(storage_key),
+                        json.dumps(json.dumps(saved, ensure_ascii=False)),
+                    ))
+                    page = context.new_page()
+                    requests, errors = [], []
+                    page.on("request", lambda request: requests.append(
+                        (request.method, request.url))
+                        if request.url.startswith(("http:", "https:")) else None)
+                    page.on("pageerror", lambda error: errors.append(str(error)))
+                    self.open_demo(page)
+                    restored = page.evaluate(
+                        "globalThis.__RENOVATION_OFFLINE_STORE__.read()"
+                    )
+                    self.assertEqual((restored["revision"],
+                                      len(restored["items"])), (7, count))
+                    self.assertNotIn("constructionCalendar", restored)
+                    self.assertEqual(restored["rooms"], saved["rooms"])
+                    self.assertEqual({item["id"] for item in restored["items"]},
+                                     {item["id"] for item in saved["items"]})
+                    page.get_by_role("tab", name="開工行事曆", exact=True).click()
+                    self.assertEqual(page.locator("[data-calendar-empty]").count(), 1)
+                    self.assertEqual(page.locator(".calendar-agenda li").count(), 0)
+                    self.assertTrue(page.locator("[data-calendar-undo]").is_disabled())
+                    self.assertEqual(page.evaluate(
+                        "globalThis.__RENOVATION_OFFLINE_STORE__.read()"
+                    ), restored)
+                    self.assertEqual([url for _, url in requests
+                                      if "/files/" in url], [])
+                    self.assertTrue(all(method == "GET" and
+                                        url.startswith(self.base)
+                                        for method, url in requests), requests)
+                    self.assertEqual(errors, [])
+                finally:
+                    context.close()
+
+    def test_old_calendar_v1_cache_keeps_roles_empty_until_explicit_edit(self):
+        older = previous_public_calendar_save()
+        older["revision"] = 7
+        robot = previous_public_robot_save()
+        robot["revision"] = 8
+        context = self.browser.new_context(accept_downloads=True)
+        try:
+            context.add_init_script("""if (location.pathname.includes('/portable/') &&
+                !localStorage.getItem('calendar-legacy-seeded')) {
+                localStorage.setItem(
+                    'renovation-equipment-offline-calendar-v1:' + location.pathname,
+                    %s);
+                localStorage.setItem(
+                    'renovation-equipment-offline-robot-v1:' + location.pathname,
+                    %s);
+                localStorage.setItem('calendar-legacy-seeded', '1');
+            }""" % (
+                json.dumps(json.dumps(older, ensure_ascii=False)),
+                json.dumps(json.dumps(robot, ensure_ascii=False)),
+            ))
+            page = context.new_page()
+            requests, errors = [], []
+            page.on("request", lambda request: requests.append(
+                (request.method, request.url))
+                if request.url.startswith(("http:", "https:")) else None)
+            page.on("pageerror", lambda error: errors.append(str(error)))
+            page.on("dialog", lambda dialog: dialog.accept())
+            self.open_demo(page)
+            loaded = page.evaluate(
+                "globalThis.__RENOVATION_OFFLINE_STORE__.read()"
+            )
+            self.assertEqual((loaded["revision"], len(loaded["items"]),
+                              loaded["constructionCalendar"]["version"]),
+                             (7, 182, 1))
+            self.assertEqual(len(loaded["constructionCalendar"]["events"]), 12)
+            self.assertTrue(all("attendees" not in event for event in
+                                loaded["constructionCalendar"]["events"]))
+            copied = json.loads(page.evaluate(
+                "localStorage.getItem('renovation-equipment-offline-calendar-attendees-v1:' + location.pathname)"
+            ))
+            self.assertEqual(copied["constructionCalendar"]["version"], 1)
+            self.assertIsNotNone(page.evaluate(
+                "localStorage.getItem('renovation-equipment-offline-calendar-v1:' + location.pathname)"
+            ))
+            page.get_by_role("tab", name="開工行事曆", exact=True).click()
+            self.assertEqual(page.locator(".calendar-agenda li").count(), 12)
+            self.assertEqual(page.locator(".calendar-owner").count(), 0)
+            self.assertEqual(page.locator(".calendar-roles-empty").count(), 12)
+            with page.expect_download() as download:
+                page.locator("#save-file").click()
+            exported = json.loads(Path(
+                download.value.path()).read_text(encoding="utf-8"))
+            self.assertEqual(exported["formatVersion"], 9)
+
+            page.locator(
+                '.calendar-agenda [data-calendar-event="construction-layout"]'
+            ).click()
+            form = page.locator("[data-calendar-form]")
+            self.assertEqual(form.locator(
+                '[name="attendees"]').input_value(), "")
+            self.assertEqual(page.evaluate(
+                "globalThis.__RENOVATION_OFFLINE_STORE__.read()"
+            ), loaded)
+            form.locator('[name="attendees"]').fill("屋主")
+            form.get_by_role("button", name="儲存工項").click()
+            page.wait_for_function("""async () => {
+                const state = await globalThis.__RENOVATION_OFFLINE_STORE__.read();
+                return state.revision === 8 &&
+                    state.constructionCalendar.version === 2 &&
+                    state.constructionCalendar.events.find(entry =>
+                        entry.id === 'construction-layout').attendees[0] === '屋主';
+            }""", timeout=15000)
+            updated = page.evaluate(
+                "globalThis.__RENOVATION_OFFLINE_STORE__.read()"
+            )
+            self.assertEqual(updated["items"], loaded["items"])
+            self.assertEqual(updated["undo"], loaded["undo"])
+            self.assertEqual(sum(not event["attendees"] for event in
+                                 updated["constructionCalendar"]["events"]), 11)
+            with page.expect_download() as download:
+                page.locator("#save-file").click()
+            upgraded = json.loads(Path(
+                download.value.path()).read_text(encoding="utf-8"))
+            self.assertEqual(upgraded["formatVersion"], 10)
+            page.reload()
+            page.wait_for_function(
+                "Boolean(globalThis.__RENOVATION_OFFLINE_STORE__)",
+                timeout=15000,
+            )
+            self.assertEqual(page.evaluate(
+                "globalThis.__RENOVATION_OFFLINE_STORE__.read()"
+            )["constructionCalendar"], updated["constructionCalendar"])
+            self.assertEqual([url for _, url in requests
+                              if "/files/" in url], [])
+            self.assertTrue(all(method == "GET" and
+                                url.startswith(self.base) for method, url in
+                                requests), requests)
+            self.assertEqual(errors, [])
+        finally:
+            context.close()
+
     def assert_balcony_sheet_context(self, page, current):
         contexts = page.locator("[data-sheet-context]")
         state = page.evaluate("globalThis.__RENOVATION_OFFLINE_STORE__.read()")
@@ -275,7 +951,7 @@ class PagesPreviewTests(unittest.TestCase):
                 "localStorage.getItem('renovation-equipment-offline-controls-v1:' + location.pathname)"
             ))
             self.assertIsNone(page.evaluate(
-                "localStorage.getItem('renovation-equipment-offline-robot-v1:' + location.pathname)"
+                "localStorage.getItem('renovation-equipment-offline-calendar-attendees-v1:' + location.pathname)"
             ))
             page.locator('.overview-svg .plan-zone[data-select-room="bedroom-1"]').click()
             height = page.locator(
@@ -285,7 +961,7 @@ class PagesPreviewTests(unittest.TestCase):
             height.press("Tab")
             page.wait_for_function("""() => {
                 const saved = localStorage.getItem(
-                    'renovation-equipment-offline-robot-v1:' + location.pathname);
+                    'renovation-equipment-offline-calendar-attendees-v1:' + location.pathname);
                 return saved && JSON.parse(saved).rooms.find(
                     room => room.id === 'bedroom-1').ceilingHeightCm === 270;
             }""", timeout=15000)
@@ -533,7 +1209,7 @@ class PagesPreviewTests(unittest.TestCase):
             self.assertIsNone(page.evaluate(
                 "localStorage.getItem('renovation-equipment-offline-v1:' + location.pathname)"
             ))
-            self.assertEqual(page.get_by_role("tab").count(), 7)
+            self.assertEqual(page.get_by_role("tab").count(), 8)
             plan = page.get_by_role("tab", name="格局圖", exact=True)
             outlet = page.get_by_role("tab", name="插座配置圖", exact=True)
             lighting = page.get_by_role("tab", name="燈具配置圖", exact=True)
@@ -675,7 +1351,7 @@ class PagesPreviewTests(unittest.TestCase):
             self.assertLessEqual(sheet_width, page.evaluate(
                 "document.documentElement.scrollWidth"))
             page.keyboard.press("End")
-            self.assertTrue(page.get_by_role("tab", name="已放置物件清單",
+            self.assertTrue(page.get_by_role("tab", name="開工行事曆",
                                              exact=True).evaluate(
                 "node => node === document.activeElement"))
             outlet.focus()
@@ -736,7 +1412,7 @@ class PagesPreviewTests(unittest.TestCase):
                 self.assertIsNotNone(imported["undo"])
                 budget = page.locator(".budget").inner_text()
                 storage_before = page.evaluate(
-                    "localStorage.getItem('renovation-equipment-offline-robot-v1:' + location.pathname)"
+                    "localStorage.getItem('renovation-equipment-offline-calendar-attendees-v1:' + location.pathname)"
                 )
                 page.get_by_role("tab", name="插座配置圖", exact=True).click()
                 self.assertEqual(page.locator("[data-sheet-point]").count(), 67)
@@ -752,7 +1428,7 @@ class PagesPreviewTests(unittest.TestCase):
                     "globalThis.__RENOVATION_OFFLINE_STORE__.read()"), imported)
                 self.assertEqual(page.locator(".budget").inner_text(), budget)
                 self.assertEqual(page.evaluate(
-                    "localStorage.getItem('renovation-equipment-offline-robot-v1:' + location.pathname)"
+                    "localStorage.getItem('renovation-equipment-offline-calendar-attendees-v1:' + location.pathname)"
                 ), storage_before)
                 with page.expect_download() as download:
                     page.locator("#save-file").click()
@@ -803,7 +1479,7 @@ class PagesPreviewTests(unittest.TestCase):
             self.assertFalse(any("controlledLightIds" in item
                                  for item in baseline["items"]))
             self.assertIsNone(page.evaluate(
-                "localStorage.getItem('renovation-equipment-offline-robot-v1:' + location.pathname)"
+                "localStorage.getItem('renovation-equipment-offline-calendar-attendees-v1:' + location.pathname)"
             ))
             page.locator('[data-action="toggle-light-preview"]').click()
             self.assertEqual(page.locator("[data-preview-light-id]").count(), 0)
@@ -834,7 +1510,7 @@ class PagesPreviewTests(unittest.TestCase):
                 "globalThis.__RENOVATION_OFFLINE_STORE__.read()"), baseline)
             self.assertEqual(page.locator(".budget").inner_text(), budget)
             self.assertIsNone(page.evaluate(
-                "localStorage.getItem('renovation-equipment-offline-robot-v1:' + location.pathname)"
+                "localStorage.getItem('renovation-equipment-offline-calendar-attendees-v1:' + location.pathname)"
             ))
             page.locator("#control-relations-form button").click()
             page.wait_for_function("""async () => {
@@ -861,7 +1537,7 @@ class PagesPreviewTests(unittest.TestCase):
                 "localStorage.getItem('renovation-equipment-offline-v1:' + location.pathname)"
             ))
             stored = json.loads(page.evaluate(
-                "localStorage.getItem('renovation-equipment-offline-robot-v1:' + location.pathname)"
+                "localStorage.getItem('renovation-equipment-offline-calendar-attendees-v1:' + location.pathname)"
             ))
             self.assertEqual(stored["revision"], 1)
 
@@ -869,7 +1545,7 @@ class PagesPreviewTests(unittest.TestCase):
                 page.locator("#save-file").click()
             exported = json.loads(Path(
                 download.value.path()).read_text(encoding="utf-8"))
-            self.assertEqual(exported["formatVersion"], 8)
+            self.assertEqual(exported["formatVersion"], 10)
             self.assertEqual(exported["state"]["items"], updated["items"])
             self.assertEqual(exported["state"]["undo"], updated["undo"])
             page.reload()
@@ -929,7 +1605,7 @@ class PagesPreviewTests(unittest.TestCase):
                 try {
                     await globalThis.__RENOVATION_OFFLINE_STORE__.update({
                         ...malformed, expectedRevision: original.revision, undo: null,
-                        controlRelationsVersion: 1, doorAllocationVersion: 1, robotFeatureVersion: 1,
+                        controlRelationsVersion: 1, doorAllocationVersion: 1, robotFeatureVersion: 1, calendarFeatureVersion: 1, calendarAttendeesVersion: 1,
                     });
                 } catch (error) { weakRejected = /弱電|來源標位/.test(error.message); }
                 const overview = renderOverviewPlan(original.rooms,original.items);
@@ -1320,7 +1996,7 @@ class PagesPreviewTests(unittest.TestCase):
                         applyProductToItem(repriced,item) : item);
                 const saved = await globalThis.__RENOVATION_OFFLINE_STORE__.update({
                     ...changed,expectedRevision:original.revision,undo:null,
-                    controlRelationsVersion:1,doorAllocationVersion:1,robotFeatureVersion:1});
+                    controlRelationsVersion:1,doorAllocationVersion:1,robotFeatureVersion:1,calendarFeatureVersion:1,calendarAttendeesVersion:1});
                 const after = calculatePlanTotal(calculateBudget(saved.items,
                     {wholePlan:true})).TWD;
                 const exported = decodeSave(encodeSave(saved));
@@ -1510,7 +2186,7 @@ class PagesPreviewTests(unittest.TestCase):
                 try {
                     await globalThis.__RENOVATION_OFFLINE_STORE__.update({
                         ...invalid,expectedRevision:source.revision,undo:null,
-                        controlRelationsVersion:1,doorAllocationVersion:1,robotFeatureVersion:1,
+                        controlRelationsVersion:1,doorAllocationVersion:1,robotFeatureVersion:1,calendarFeatureVersion:1,calendarAttendeesVersion:1,
                     });
                 } catch (error) {
                     invalidStateRejected = /室外|窗位|產品/.test(error.message);
@@ -1657,7 +2333,7 @@ class PagesPreviewTests(unittest.TestCase):
                 }
                 const saved = await globalThis.__RENOVATION_OFFLINE_STORE__.update({
                     ...changed,expectedRevision:source.revision,undo:null,
-                    controlRelationsVersion:1,doorAllocationVersion:1,robotFeatureVersion:1,
+                    controlRelationsVersion:1,doorAllocationVersion:1,robotFeatureVersion:1,calendarFeatureVersion:1,calendarAttendeesVersion:1,
                 });
                 const root = new URL('../extensions/renovation-equipment/assets/',
                     location.href);
@@ -1805,7 +2481,7 @@ class PagesPreviewTests(unittest.TestCase):
                     product.id && linkedProductMismatch(repriced,item));
                 const changed = await globalThis.__RENOVATION_OFFLINE_STORE__.update({
                     ...updated,expectedRevision:source.revision,undo:null,
-                    controlRelationsVersion:1,doorAllocationVersion:1,robotFeatureVersion:1,
+                    controlRelationsVersion:1,doorAllocationVersion:1,robotFeatureVersion:1,calendarFeatureVersion:1,calendarAttendeesVersion:1,
                 });
                 const budgetAfter = calculatePlanTotal(calculateBudget(changed.items,
                     {wholePlan:true})).TWD;
@@ -1816,7 +2492,7 @@ class PagesPreviewTests(unittest.TestCase):
                 try {
                     await globalThis.__RENOVATION_OFFLINE_STORE__.update({
                         ...invalid,expectedRevision:changed.revision,undo:null,
-                        controlRelationsVersion:1,doorAllocationVersion:1,robotFeatureVersion:1});
+                        controlRelationsVersion:1,doorAllocationVersion:1,robotFeatureVersion:1,calendarFeatureVersion:1,calendarAttendeesVersion:1});
                 } catch (error) {
                     extraRejected = /衛浴器具安裝費須為 0/.test(error.message);
                 }
@@ -1828,7 +2504,7 @@ class PagesPreviewTests(unittest.TestCase):
                 try {
                     await globalThis.__RENOVATION_OFFLINE_STORE__.update({
                         ...invalid,expectedRevision:changed.revision,undo:null,
-                        controlRelationsVersion:1,doorAllocationVersion:1,robotFeatureVersion:1});
+                        controlRelationsVersion:1,doorAllocationVersion:1,robotFeatureVersion:1,calendarFeatureVersion:1,calendarAttendeesVersion:1});
                 } catch (error) {
                     specialRejected = /只有燈具或原報已含/.test(error.message);
                 }
@@ -1845,7 +2521,7 @@ class PagesPreviewTests(unittest.TestCase):
                         'bath-main-toilet'),
                     extraRejected,specialRejected,
                     stillSaved:JSON.parse(localStorage.getItem(
-                        'renovation-equipment-offline-robot-v1:' + location.pathname))
+                        'renovation-equipment-offline-calendar-attendees-v1:' + location.pathname))
                         .items.find(item => item.id ===
                             'bath-main-heated-towel-rail').installationUnitPrice,
                 };
@@ -2097,7 +2773,7 @@ class PagesPreviewTests(unittest.TestCase):
                              stored["items"] if item["id"] == "bath-main-toilet"))
             self.assertEqual(stored["revision"], 7)
             copied = json.loads(page.evaluate(
-                "localStorage.getItem('renovation-equipment-offline-robot-v1:' + location.pathname)"
+                "localStorage.getItem('renovation-equipment-offline-calendar-attendees-v1:' + location.pathname)"
             ))
             self.assertEqual(copied["revision"], 7)
             self.assertIsNone(page.evaluate(
@@ -2204,7 +2880,7 @@ class PagesPreviewTests(unittest.TestCase):
                 page.locator("#save-file").click()
             exported = json.loads(Path(
                 download.value.path()).read_text(encoding="utf-8"))
-            self.assertEqual(exported["formatVersion"], 8)
+            self.assertEqual(exported["formatVersion"], 10)
             self.assertEqual(exported["state"]["items"], original["items"])
             self.assertIsNone(exported["state"]["undo"])
             page.locator('[data-plan-room-select]').select_option("bath-main")
@@ -2396,13 +3072,13 @@ class PagesPreviewTests(unittest.TestCase):
                 self.assertEqual(page.locator("#overall-total").inner_text(),
                                  "NT$2,322,060.2")
                 self.assertIsNotNone(page.evaluate(
-                    "localStorage.getItem('renovation-equipment-offline-robot-v1:' + location.pathname)"
+                    "localStorage.getItem('renovation-equipment-offline-calendar-attendees-v1:' + location.pathname)"
                 ))
                 with page.expect_download() as download:
                     page.locator("#save-file").click()
                 exported = json.loads(Path(
                     download.value.path()).read_text(encoding="utf-8"))
-                self.assertEqual(exported["formatVersion"], 8)
+                self.assertEqual(exported["formatVersion"], 10)
                 self.assertEqual(exported["state"]["items"], edited["items"])
                 page.locator("#undo-last").click()
                 page.wait_for_function("""async () => {
@@ -2470,7 +3146,7 @@ class PagesPreviewTests(unittest.TestCase):
             self.assertEqual(next(room for room in loaded["rooms"] if room["id"] ==
                                   "kitchen")["ceilingHeightCm"], 275)
             copied = json.loads(page.evaluate(
-                "localStorage.getItem('renovation-equipment-offline-robot-v1:' + location.pathname)"
+                "localStorage.getItem('renovation-equipment-offline-calendar-attendees-v1:' + location.pathname)"
             ))
             self.assertEqual(copied["items"], loaded["items"])
             self.assertIsNotNone(page.evaluate(
@@ -2604,7 +3280,7 @@ class PagesPreviewTests(unittest.TestCase):
                     '.overview-svg [data-plan-door-id="main-bath-hall"]'
                 ).get_attribute("class").split())
                 copied = json.loads(page.evaluate(
-                    "localStorage.getItem('renovation-equipment-offline-robot-v1:' + location.pathname)"
+                    "localStorage.getItem('renovation-equipment-offline-calendar-attendees-v1:' + location.pathname)"
                 ))
                 self.assertEqual(copied["items"], saved["items"])
                 page.get_by_role("tab", name="燈具配置圖", exact=True).click()
@@ -2687,7 +3363,7 @@ class PagesPreviewTests(unittest.TestCase):
             saved = json.loads(Path(download.value.path()).read_text(encoding="utf-8"))
             self.assertEqual((saved["formatVersion"], len(saved["state"]["items"]),
                               len(saved["state"]["products"]), saved["state"]["undo"]),
-                             (8, 182, 28, None))
+                             (10, 182, 28, None))
             page.locator('.overview-svg .plan-zone[data-select-room="kitchen"]').click()
             self.assertEqual(page.locator(
                 '.room-svg [data-marker-id^="kitchen-plan-"]').count(), 12)
@@ -2777,7 +3453,7 @@ class PagesPreviewTests(unittest.TestCase):
             page.locator("#save-now").click()
             page.wait_for_function("""original => {
                 const saved = localStorage.getItem(
-                    'renovation-equipment-offline-robot-v1:' + location.pathname);
+                    'renovation-equipment-offline-calendar-attendees-v1:' + location.pathname);
                 if (!saved) return false;
                 const moved = JSON.parse(saved).items.find(item =>
                     item.id === 'kitchen-plan-ih').placement;
@@ -2862,7 +3538,7 @@ class PagesPreviewTests(unittest.TestCase):
                 const state = await globalThis.__RENOVATION_OFFLINE_STORE__.read();
                 state.rooms.find(room => room.id === 'bedroom-1').ceilingHeightCm = 240;
                 localStorage.setItem(
-                    'renovation-equipment-offline-robot-v1:' + location.pathname,
+                    'renovation-equipment-offline-calendar-attendees-v1:' + location.pathname,
                     JSON.stringify(state));
             }""")
             page.locator('.overview-svg .plan-zone[data-select-room="bedroom-1"]').click()
@@ -2876,7 +3552,7 @@ class PagesPreviewTests(unittest.TestCase):
                 timeout=15000,
             )
             saved = json.loads(page.evaluate(
-                "localStorage.getItem('renovation-equipment-offline-robot-v1:' + location.pathname)"
+                "localStorage.getItem('renovation-equipment-offline-calendar-attendees-v1:' + location.pathname)"
             ))
             self.assertEqual(saved["rooms"][3]["ceilingHeightCm"], 240)
         finally:

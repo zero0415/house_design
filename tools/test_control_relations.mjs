@@ -22,6 +22,8 @@ import {
 } from "../extensions/renovation-equipment/assets/socket-plan.js";
 import { ROBOT_ID } from
     "../extensions/renovation-equipment/assets/robot-plan.js";
+import { calendarFields } from
+    "../extensions/renovation-equipment/assets/construction-calendar.js";
 
 const path = new URL("../files/設備規劃.json", import.meta.url);
 const raw = await readFile(path, "utf8");
@@ -39,6 +41,8 @@ const capabilities = {
     controlRelationsVersion: CONTROL_RELATIONS_VERSION,
     doorAllocationVersion: 1,
     robotFeatureVersion: 1,
+    calendarFeatureVersion: 1,
+    calendarAttendeesVersion: 1,
 };
 
 function assigned() {
@@ -68,7 +72,7 @@ test("anonymous v5 sample remains untouched, with no inferred same-room or cross
     }
     assert.deepEqual(previewCircuitLinks(baseline.items), []);
     assert.equal(hasControlRelations(baseline), false);
-    assert.equal(JSON.parse(encodeSave(baseline)).formatVersion, 8);
+    assert.equal(JSON.parse(encodeSave(baseline)).formatVersion, 10);
     assert.doesNotMatch(renderOverviewPlan(baseline.rooms, baseline.items, false,
         new Set()), /data-preview-light-id=/);
     const lighting = renderElectricalSheet(baseline, "lighting-sheet");
@@ -140,34 +144,47 @@ test("reject malformed, orphaned, removed or unplaced controls without mutating 
     assert.equal(previewCircuitLinks(stale.items).length, 0);
 });
 
-test("container 8 retains controls with robot and door attribution; older exports stay readable", () => {
+test("container 10 retains controls and role calendar; versions 9/8/7 remain readable", () => {
     const state = assigned();
     const document = JSON.parse(encodeSave(state));
-    assert.equal(document.formatVersion, 8);
+    assert.equal(document.formatVersion, 10);
     assert.equal(document.state.version, 5);
     assert.deepEqual(decodeSave(JSON.stringify(document)),
-        { ...snapshot(state), undo: state.undo });
+        { ...snapshot(state), undo: state.undo, ...calendarFields(state) });
     assert.throws(() => decodeSave(JSON.stringify({
         ...document, formatVersion: 6,
         state: { ...document.state, items: baseline.items, undo: null },
-    })), /完整對應欄位/);
+    })), /容器 10/);
     assert.throws(() => decodeSave(JSON.stringify({
         ...document, formatVersion: 6,
         state: { ...document.state, version: 4 },
     })), /v5 資料/);
     const undoOnly = structuredClone(baseline);
     undoOnly.undo = snapshot(state);
-    assert.equal(JSON.parse(encodeSave(undoOnly)).formatVersion, 8);
+    assert.equal(JSON.parse(encodeSave(undoOnly)).formatVersion, 10);
     assert.deepEqual(decodeSave(encodeSave(undoOnly)).undo, undoOnly.undo);
-    assert.equal(JSON.parse(encodeSave(baseline)).formatVersion, 8);
+    assert.equal(JSON.parse(encodeSave(baseline)).formatVersion, 10);
+    const priorCalendarState = structuredClone(baseline);
+    priorCalendarState.constructionCalendar = {
+        ...priorCalendarState.constructionCalendar, version: 1,
+        events: priorCalendarState.constructionCalendar.events.map(
+            ({ attendees: _attendees, ...event }) => event),
+        undo: [],
+    };
+    assert.equal(JSON.parse(encodeSave(priorCalendarState)).formatVersion, 9);
+    const priorRobotState = structuredClone(baseline);
+    delete priorRobotState.constructionCalendar;
+    assert.equal(JSON.parse(encodeSave(priorRobotState)).formatVersion, 8);
     const priorDoorState = structuredClone(baseline);
+    delete priorDoorState.constructionCalendar;
     priorDoorState.items = priorDoorState.items.filter((entry) =>
         entry.id !== ROBOT_ID);
     assert.equal(JSON.parse(encodeSave(priorDoorState)).formatVersion, 7);
     assert.deepEqual(decodeSave(encodeSave(baseline)),
-        { ...snapshot(baseline), undo: null });
+        { ...snapshot(baseline), undo: null, ...calendarFields(baseline) });
     for (const version of [2, 3, 4, 5]) {
         const legacy = { ...structuredClone(baseline), version, undo: null };
+        delete legacy.constructionCalendar;
         assert.doesNotThrow(() => decodeSave(JSON.stringify(legacy)));
     }
     const outlet = createQuotedOutletItems().find((entry) =>
@@ -235,9 +252,12 @@ test("guarded store rejects old writer or orphan, supports clearing and one comp
         });
         assert.equal(previewCircuitLinks(next.items).length, 0);
         const restored = await store.update(next.revision, {
-            version: 5, ...next.undo, undo: null, ...capabilities,
+            version: 5, ...next.undo, undo: null,
+            ...calendarFields(next), ...capabilities,
         });
         assert.deepEqual(snapshot(restored), snapshot(saved));
+        assert.deepEqual(restored.constructionCalendar,
+            baseline.constructionCalendar);
         assert.equal(previewCircuitLinks(restored.items).length, 3);
         assert.throws(() => guardControlRelationsUpdate(next, oldWriter), /舊版/);
         assert.throws(() => guardControlRelationsUpdate(

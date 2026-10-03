@@ -4,6 +4,8 @@ import re
 import unittest
 from pathlib import Path
 
+from tools.build_portable import build_modules
+
 
 ROOT = Path(__file__).resolve().parents[1]
 SAMPLE = ROOT / "files" / "設備規劃.json"
@@ -13,6 +15,7 @@ PAGES_ENTRY = ROOT / "index.html"
 ADDRESS = re.compile(r"[\u4e00-\u9fff]{2,10}(?:路|街)\d+(?:之\d+)?號(?:\d+樓)?")
 EMAIL = re.compile(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}")
 PHONE = re.compile(r"(?<!\d)09\d{8}(?!\d)|(?<!\d)0[2-8][- ]?\d{7,8}(?!\d)")
+OWNER_HEADCOUNT = re.compile(r"屋主(?:[0-9０-９]+|[零〇一二三四五六七八九十百千]+)人")
 PUBLIC_PRODUCT_SKU = "02603" + "6388"
 SKU_CONTEXTS = ("trplus.com.tw/p/", "catalog-ceiling-trplus-")
 
@@ -44,7 +47,29 @@ class PublicSnapshotTests(unittest.TestCase):
             with self.subTest(value=value):
                 self.assertIn(value, readme)
                 self.assertIn(value, quote)
-        self.assertIn("182 個物件與 28 款商品", readme)
+        self.assertIn("182 個物件、28 款商品", readme)
+        for value in ("開工行事曆", "13 筆", "電梯走道保護",
+                      "2027-01-30",
+                      "2027-02-05 除夕、02-06 春節初一",
+                      "獨立單步 Undo", "行事曆 v1 使用 **9**",
+                      "JSON 容器 **10**", "誰要出席",
+                      "屋主、廚房工人、系統櫃工人",
+                      "renovation-equipment-offline-calendar-attendees-v1",
+                      "不串接 Google 帳戶"):
+            with self.subTest(calendar=value):
+                self.assertIn(value, readme)
+        self.assertIn("不是原工程報價的合約工期", quote)
+        self.assertIn("其餘 11 筆（包含電梯走道保護）**未指定**",
+                      quote)
+        self.assertIn("保護範圍、材料、管理許可與費用均待核", quote)
+        self.assertIn("輕隔間廠商代表", readme)
+        self.assertIn("代表，**不是工人**", quote)
+        for value in ("完整展開", "24 個月", "師傅固定休假",
+                      "週日例外安排", "藍色人形圖示", "週一續畫"):
+            with self.subTest(calendar_display=value):
+                self.assertIn(value, readme)
+        self.assertIn("跨日施工條不畫週日、週一續畫", quote)
+        self.assertIn("原始含首尾起迄日期不改、完工不順延", quote)
         for value in ("原兩組各 **NT$19,000 木纖滑門**", "原報軌道額度",
                       "臥室3↔工作室", "未計算", "不自動新增費用",
                       "不自動新增費用、扣款或退還主浴軌道額度",
@@ -113,6 +138,7 @@ class PublicSnapshotTests(unittest.TestCase):
         state = json.loads(SAMPLE.read_text(encoding="utf-8"))
         self.assertEqual(set(state), {
             "version", "revision", "updatedAt", "rooms", "items", "products", "undo",
+            "constructionCalendar",
         })
         self.assertEqual((state["version"], state["revision"], state["undo"]), (5, 0, None))
         self.assertEqual(state["updatedAt"], "2026-01-01T00:00:00.000Z")
@@ -142,9 +168,65 @@ class PublicSnapshotTests(unittest.TestCase):
             r"[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}", item["id"], re.I
         ) for item in state["items"]))
 
+    def test_public_calendar_seed_has_thirteen_tentative_jobs_and_independent_undo(self):
+        state = json.loads(SAMPLE.read_text(encoding="utf-8"))
+        self.assertEqual(hashlib.sha256(SAMPLE.read_bytes()).hexdigest(),
+                         "413ae7ded2f0731" +
+                         "561630e032ec22c966850be87cc357a9c9f01b0f4407db1d6")
+        self.assertEqual((state["version"], state["revision"], state["undo"]),
+                         (5, 0, None))
+        calendar = state["constructionCalendar"]
+        self.assertEqual((calendar["version"], calendar["seed"],
+                          len(calendar["undo"])),
+                         (2, "public-construction-draft-2026-10-v1", 12))
+        self.assertEqual([(event["title"], event["start"], event["end"])
+                          for event in calendar["events"]], [
+            ("開工.拆除確認", "2026-10-09", "2026-10-09"),
+            ("拆除施工", "2026-10-13", "2026-10-16"),
+            ("電梯走道保護", "2026-10-13", "2026-10-13"),
+            ("水電放樣", "2026-10-17", "2026-10-17"),
+            ("輕隔間隔單面牆", "2026-10-17", "2026-10-17"),
+            ("水電施工", "2026-10-19", "2026-11-13"),
+            ("泥作施工", "2026-11-16", "2026-12-11"),
+            ("輕隔間及天花板", "2026-12-14", "2026-12-18"),
+            ("油漆施工", "2026-12-21", "2027-01-15"),
+            ("廚具.系統櫃體安裝", "2027-01-18", "2027-01-23"),
+            ("水電自備項目安裝(燈具.衛浴設備等)", "2027-01-25", "2027-01-27"),
+            ("全室清潔", "2027-01-28", "2027-01-29"),
+            ("油漆最終收尾及完工點交", "2027-01-30", "2027-01-30"),
+        ])
+        self.assertTrue(all(event["status"] == "tentative"
+                            for event in calendar["events"]))
+        self.assertTrue(all("暫排" in event["note"] for event in calendar["events"]))
+        attendees = {event["id"]: event["attendees"]
+                     for event in calendar["events"]}
+        self.assertEqual(attendees["construction-start"],
+                         ["屋主", "輕隔間廠商代表"])
+        self.assertEqual(attendees["construction-layout"],
+                         ["屋主", "廚房工人", "系統櫃工人"])
+        self.assertEqual(attendees["construction-elevator-protection"], [])
+        self.assertEqual(sum(not roles for roles in attendees.values()), 11)
+        self.assertEqual(next(event["attendees"] for event in calendar["undo"]
+                              if event["id"] == "construction-start"),
+                         ["屋主", "輕隔間廠商代表"])
+        self.assertEqual(next(event["attendees"] for event in calendar["undo"]
+                              if event["id"] == "construction-layout"),
+                         ["屋主", "廚房工人", "系統櫃工人"])
+        self.assertFalse(any(event["id"] == "construction-elevator-protection"
+                             for event in calendar["undo"]))
+        self.assertEqual([{key: value for key, value in event.items()
+                           if key != "attendees"} for event in calendar["undo"]],
+                         [{key: value for key, value in event.items()
+                           if key != "attendees"} for event in
+                          calendar["events"] if event["id"] !=
+                          "construction-elevator-protection"])
+        self.assertIn("已知暫計 **NT$2,322,060.20**",
+                      (ROOT / "README.md").read_text(encoding="utf-8"))
+
     def test_robot_is_unpriced_unlinked_and_does_not_create_outlets_or_switches(self):
         self.assertEqual(hashlib.sha256(SAMPLE.read_bytes()).hexdigest(),
-                         "b1c8a5dcd2a768acae1e99606a65caad44c53927fab5899053d44b84e685ffcc")
+                         "413ae7ded2f0731" +
+                         "561630e032ec22c966850be87cc357a9c9f01b0f4407db1d6")
         state = json.loads(SAMPLE.read_text(encoding="utf-8"))
         robot = state["items"][-1]
         self.assertEqual((robot["id"], robot["roomId"], robot["kind"],
@@ -586,6 +668,7 @@ class PublicSnapshotTests(unittest.TestCase):
         self.assertIsNotNone(match)
         bundle = json.loads(match.group(1))
         self.assertEqual(set(bundle), {"modules"})
+        self.assertEqual(bundle["modules"], build_modules())
         self.assertIn("assets/app.js", {entry["path"] for entry in bundle["modules"]})
         self.assertIn("assets/floorplan.js", {entry["path"] for entry in bundle["modules"]})
         self.assertIn("assets/survey.js", {entry["path"] for entry in bundle["modules"]})
@@ -594,6 +677,8 @@ class PublicSnapshotTests(unittest.TestCase):
                      "quote-provenance.js", "guest-bath-plan.js",
                      "balcony-plan.js", "electrical-sheets.js",
                      "door-allocation.js", "robot-plan.js",
+                     "construction-calendar.js", "calendar-reference.js",
+                     "calendar-view.js",
                      "circuit-preview.js", "file-actions.js"):
             self.assertIn(f"assets/{name}", {entry["path"] for entry in bundle["modules"]})
         for name in ("corridor-plan.js", "air-conditioning-plan.js"):
@@ -620,9 +705,15 @@ class PublicSnapshotTests(unittest.TestCase):
         self.assertIn('renovation-equipment-offline-controls-v1:', bootstrap)
         self.assertIn('renovation-equipment-offline-doors-v1:', bootstrap)
         self.assertIn('renovation-equipment-offline-robot-v1:', bootstrap)
+        self.assertIn('renovation-equipment-offline-calendar-v1:', bootstrap)
+        self.assertIn('renovation-equipment-offline-calendar-attendees-v1:', bootstrap)
         self.assertIn('renovation-equipment-offline-v1:', bootstrap)
         self.assertIn("guardControlRelationsUpdate(current, candidate)", bootstrap)
         self.assertIn("guardRobotPlanUpdate(current, candidate)", bootstrap)
+        self.assertIn("guardCalendarUpdate(current, candidate)", bootstrap)
+        self.assertIn("calendarAttendeesVersion: CALENDAR_ATTENDEES_VERSION", (
+            ROOT / "extensions" / "renovation-equipment" / "assets" /
+            "state-transport.js").read_text(encoding="utf-8"))
         self.assertNotIn("179", bootstrap)
         self.assertNotIn(SAMPLE.read_text(encoding="utf-8")[:100],
                          PORTABLE.read_text(encoding="utf-8"))
@@ -643,6 +734,7 @@ class PublicSnapshotTests(unittest.TestCase):
                 text = content.decode("utf-8")
                 self.assertNotRegex(text, ADDRESS)
                 self.assertNotRegex(text, EMAIL)
+                self.assertNotRegex(text, OWNER_HEADCOUNT)
                 phones = [match.group() for match in PHONE.finditer(text)
                           if not (match.group() == PUBLIC_PRODUCT_SKU and
                                   any(text[:match.start()].endswith(prefix)

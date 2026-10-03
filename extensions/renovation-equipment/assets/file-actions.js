@@ -18,6 +18,7 @@ import {
     hasDoorAllocation, isQuotedDoor, isUnquotedBalconyDoor,
 } from "./door-allocation.js";
 import { hasRobotPlan } from "./robot-plan.js";
+import { hasCalendar, validateCalendar } from "./construction-calendar.js";
 import { isSlideTrack } from "./budget.js";
 import { quoteProvenance } from "./quote-provenance.js";
 import {
@@ -34,9 +35,13 @@ export function encodeSave(state, exportedAt = new Date().toISOString()) {
         state.version !== PLANNER_STATE_VERSION) {
         throw new TypeError("設備清單未完整載入，無法輸出存檔。");
     }
+    const calendar = hasCalendar(state)
+        ? { constructionCalendar: validateCalendar(state.constructionCalendar) } : {};
     return JSON.stringify({
         format: SAVE_FORMAT,
-        formatVersion: hasRobotPlan(state) ? 8 :
+        formatVersion: hasCalendar(state)
+            ? calendar.constructionCalendar.version === 2 ? 10 : 9 :
+            hasRobotPlan(state) ? 8 :
             hasDoorAllocation(state) ? 7 :
             hasControlRelations(state) ? 6 : SAVE_FORMAT_VERSION,
         exportedAt,
@@ -48,6 +53,7 @@ export function encodeSave(state, exportedAt = new Date().toISOString()) {
             items: state.items,
             products: state.products,
             undo: state.undo ?? null,
+            ...calendar,
         },
     }, null, 2) + "\n";
 }
@@ -67,10 +73,35 @@ export function decodeSave(text) {
     const unwrapped = versions.includes(document?.version) &&
         document?.format === undefined;
     if (!unwrapped && (document?.format !== SAVE_FORMAT ||
-        ![...versions, 6, 7, 8].includes(document?.formatVersion))) {
+        ![...versions, 6, 7, 8, 9, 10].includes(document?.formatVersion))) {
         throw new RangeError("存檔格式或版本不相容；請使用本規劃器匯出的 JSON。");
     }
     const imported = unwrapped ? document : document.state;
+    if (!unwrapped && [9, 10].includes(document.formatVersion) &&
+        (imported?.version !== PLANNER_STATE_VERSION ||
+            !hasCalendar(imported))) {
+        throw new RangeError(
+            `容器 ${document.formatVersion} 存檔須包含 v5 資料及完整行事曆` +
+                "（含獨立復原），現有規劃未變更。"
+        );
+    }
+    if (hasCalendar(imported) &&
+        imported.version !== PLANNER_STATE_VERSION) {
+        throw new RangeError(
+            "含行事曆的存檔須使用對應容器 9 或 10 及 v5 資料，現有規劃未變更。"
+        );
+    }
+    const calendar = hasCalendar(imported)
+        ? { constructionCalendar: validateCalendar(imported.constructionCalendar) } : {};
+    if (hasCalendar(imported) && !unwrapped &&
+        document.formatVersion !==
+            (calendar.constructionCalendar.version === 2 ? 10 : 9)) {
+        throw new RangeError(
+            `行事曆版本不相容；此資料須使用容器 ` +
+            `${calendar.constructionCalendar.version === 2 ? 10 : 9}，` +
+            "現有規劃未變更。"
+        );
+    }
     if (!unwrapped && document.formatVersion === 6 &&
         (imported?.version !== PLANNER_STATE_VERSION ||
             !hasControlRelations(imported))) {
@@ -102,6 +133,7 @@ export function decodeSave(text) {
         items: lighting.items,
         products: lighting.products ?? [],
         undo: lighting.undo ?? null,
+        ...calendar,
     };
 }
 
