@@ -24,6 +24,8 @@ try {
         await import(moduleURLs.get("assets/robot-plan.js"));
     const { guardCalendarUpdate, calendarFields } =
         await import(moduleURLs.get("assets/construction-calendar.js"));
+    const { guardManagementFeeUpdate, managementFeeFields } =
+        await import(moduleURLs.get("assets/management-fee.js"));
     const legacyStorageKey = `renovation-equipment-offline-v1:${location.pathname}`;
     const controlsStorageKey =
         `renovation-equipment-offline-controls-v1:${location.pathname}`;
@@ -31,8 +33,10 @@ try {
     const robotStorageKey = `renovation-equipment-offline-robot-v1:${location.pathname}`;
     const calendarStorageKey =
         `renovation-equipment-offline-calendar-v1:${location.pathname}`;
-    const storageKey =
+    const attendeesStorageKey =
         `renovation-equipment-offline-calendar-attendees-v1:${location.pathname}`;
+    const storageKey =
+        `renovation-equipment-offline-management-fee-v1:${location.pathname}`;
     const pagesDemo = (location.protocol === "https:" || location.protocol === "http:") &&
         new URL(location.href).searchParams.get("demo") === "pages";
     if (pagesDemo) {
@@ -48,7 +52,8 @@ try {
     let storedText = null;
     try {
         const ownSaved = localStorage.getItem(storageKey);
-        storedText = ownSaved ?? localStorage.getItem(calendarStorageKey) ??
+        storedText = ownSaved ?? localStorage.getItem(attendeesStorageKey) ??
+            localStorage.getItem(calendarStorageKey) ??
             localStorage.getItem(robotStorageKey) ??
             localStorage.getItem(doorsStorageKey) ??
             localStorage.getItem(controlsStorageKey) ??
@@ -95,6 +100,7 @@ try {
             }
             const ownSaved = localStorage.getItem(storageKey);
             const latestSaved = ownSaved ??
+                localStorage.getItem(attendeesStorageKey) ??
                 localStorage.getItem(calendarStorageKey) ??
                 localStorage.getItem(robotStorageKey) ??
                 localStorage.getItem(doorsStorageKey) ??
@@ -175,6 +181,7 @@ try {
             guardDoorAllocationUpdate(current, candidate);
             guardRobotPlanUpdate(current, candidate);
             guardCalendarUpdate(current, candidate);
+            guardManagementFeeUpdate(current, candidate);
             const next = validateState({
                 version: PLANNER_STATE_VERSION,
                 revision: revision + 1,
@@ -184,6 +191,7 @@ try {
                 products: candidate.products,
                 undo: candidate.undo ?? null,
                 ...calendarFields(candidate),
+                ...managementFeeFields(candidate),
             });
             let warning = null;
             try {

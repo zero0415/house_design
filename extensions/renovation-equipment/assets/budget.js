@@ -8,6 +8,7 @@ import {
     DEDICATED_CIRCUIT_UNIT_PRICE_TWD, QUOTED_CIRCUITS, QUOTED_OUTLETS,
     SOCKET_UNIT_PRICE_TWD,
 } from "./socket-plan.js";
+import { managementFeeSummary } from "./management-fee.js";
 
 export const ORIGINAL_QUOTE_TWD = 1_959_530;
 
@@ -80,10 +81,12 @@ export function isQuotedEquipment(item) {
         item.quotedQuantity !== null && item.quotedQuantity !== undefined;
 }
 
-export function calculatePlanTotal(budget) {
+export function calculatePlanTotal(budget, managementFee) {
     return {
         TWD: Math.round((ORIGINAL_QUOTE_TWD + budget.additionalTotals.TWD -
-            budget.reductionTWD + Number.EPSILON) * 100) / 100,
+            budget.reductionTWD +
+            managementFeeSummary(managementFee).totalTWD +
+            Number.EPSILON) * 100) / 100,
         foreignTotals: {
             JPY: budget.additionalTotals.JPY,
             USD: budget.additionalTotals.USD,

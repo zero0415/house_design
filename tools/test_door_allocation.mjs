@@ -32,6 +32,7 @@ const path = new URL("../files/設備規劃.json", import.meta.url);
 const raw = await readFile(path, "utf8");
 const currentSample = JSON.parse(raw);
 const sample = structuredClone(currentSample);
+delete sample.managementCleaningFee;
 delete sample.constructionCalendar;
 sample.items = sample.items.filter((entry) => entry.id !== ROBOT_ID);
 const item = (state, id) => state.items.find((entry) => entry.id === id);

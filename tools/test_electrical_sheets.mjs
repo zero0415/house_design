@@ -207,7 +207,7 @@ test("rendering and offline bundle leave the exact anonymous quote and sample in
     assert.equal(state.revision, 0);
     assert.equal(state.undo, null);
     assert.equal(summarize(state).originalQuoteTWD, 1_959_530);
-    assert.equal(summarize(state).overallTotals.TWD, 2_322_060.2);
+    assert.equal(summarize(state).overallTotals.TWD, 2_333_060.2);
     assert.equal(await readFile(path, "utf8"), raw);
     const portable = await readFile(
         new URL("../portable/裝修設備規劃.html", import.meta.url), "utf8");

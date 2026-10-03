@@ -5,6 +5,7 @@ import { ROBOT_FEATURE_VERSION } from "./robot-plan.js";
 import {
     CALENDAR_ATTENDEES_VERSION, CALENDAR_VERSION,
 } from "./construction-calendar.js";
+import { MANAGEMENT_FEE_VERSION } from "./management-fee.js";
 
 export function isPortableMode() {
     return Boolean(globalThis.__RENOVATION_OFFLINE_STORE__);
@@ -35,6 +36,7 @@ export async function writePlannerState(payload) {
         robotFeatureVersion: ROBOT_FEATURE_VERSION,
         calendarFeatureVersion: CALENDAR_VERSION,
         calendarAttendeesVersion: CALENDAR_ATTENDEES_VERSION,
+        managementFeeVersion: MANAGEMENT_FEE_VERSION,
     };
     if (isPortableMode()) {
         return globalThis.__RENOVATION_OFFLINE_STORE__.update(payload);

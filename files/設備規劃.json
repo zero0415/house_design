@@ -11898,5 +11898,16 @@
         "attendees": []
       }
     ]
+  },
+  "managementCleaningFee": {
+    "version": 1,
+    "fee": {
+      "start": "2026-10-13",
+      "end": "2027-01-30",
+      "dailyRate": 100
+    },
+    "undo": {
+      "fee": null
+    }
   }
 }

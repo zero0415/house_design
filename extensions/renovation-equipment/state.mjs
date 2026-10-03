@@ -12,6 +12,10 @@ import { guardRobotPlanUpdate, isPlannedRobot } from "./assets/robot-plan.js";
 import {
     calendarFields, guardCalendarUpdate, hasCalendar, validateCalendar,
 } from "./assets/construction-calendar.js";
+import {
+    guardManagementFeeUpdate, hasManagementFee, managementFeeFields,
+    managementFeeSummary,
+} from "./assets/management-fee.js";
 import { ROOM_DRAWING_DIMENSIONS } from "./assets/house-geometry.js";
 import { DOOR_OPTIONS } from "./assets/door-options.js";
 import { QUOTED_SLIDE_TRACKS, SLIDE_TRACK_RATE_TWD } from "./assets/slide-tracks.js";
@@ -795,6 +799,9 @@ export function validateState(data) {
     if (!data || typeof data !== "object" || Array.isArray(data)) {
         throw new StoreError(400, "設備資料版本無效，未寫入任何變更。");
     }
+    if (hasManagementFee(data) && data.version !== PLANNER_STATE_VERSION) {
+        throw new StoreError(400, "管委會清潔費須使用 v5 資料。");
+    }
     if (data.version === 1) data = upgradeLegacySocketPlan(data);
     if (data.version === SOCKET_PLAN_VERSION) {
         if (data.undo != null) {
@@ -1510,6 +1517,13 @@ export function validateState(data) {
             throw new StoreError(400, error.message);
         }
     }
+    let feeFields;
+    try {
+        feeFields = managementFeeFields(data);
+    } catch (error) {
+        if (!(error instanceof TypeError)) throw error;
+        throw new StoreError(400, error.message);
+    }
     return {
         version: PLANNER_STATE_VERSION,
         revision: data.revision,
@@ -1519,6 +1533,7 @@ export function validateState(data) {
         products,
         undo,
         ...(constructionCalendar ? { constructionCalendar } : {}),
+        ...feeFields,
     };
 }
 
@@ -1527,7 +1542,11 @@ export function summarize(state) {
     return {
         itemCount: state.items.length, productCount: state.products.length, ...budget,
         originalQuoteTWD: ORIGINAL_QUOTE_TWD,
-        overallTotals: calculatePlanTotal(budget),
+        overallTotals: calculatePlanTotal(budget, state.managementCleaningFee),
+        ...(hasManagementFee(state)
+            ? { managementFeeTotals: managementFeeSummary(
+                state.managementCleaningFee) }
+            : {}),
     };
 }
 
@@ -1578,6 +1597,7 @@ export function createStore(filePath) {
                 guardDoorAllocationUpdate(current, candidate);
                 guardRobotPlanUpdate(current, candidate);
                 guardCalendarUpdate(current, candidate);
+                guardManagementFeeUpdate(current, candidate);
             } catch (error) {
                 if (!(error instanceof TypeError)) throw error;
                 throw new StoreError(400, error.message);
@@ -1591,6 +1611,7 @@ export function createStore(filePath) {
                 products: candidate?.products,
                 undo: candidate?.undo ?? null,
                 ...calendarFields(candidate),
+                ...managementFeeFields(candidate),
             });
             for (const product of current.products) {
                 const replacement = next.products.find((entry) => entry.id === product.id);

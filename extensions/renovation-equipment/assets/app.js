@@ -57,6 +57,13 @@ import {
 } from "./construction-calendar.js";
 import { bindCalendar, calendarUI, renderCalendar } from "./calendar-view.js";
 import {
+    importManagementFee, managementFeeFields, managementFeeSummary,
+} from "./management-fee.js";
+import {
+    bindManagementFee, managementFeeDescription, managementFeeUI,
+    renderManagementFee,
+} from "./management-fee-view.js";
+import {
     BEDROOM2_PARTITION_ID, BEDROOM2_PARTITION_OPTIONS, BEDROOM2_PARTITION_QUOTED_AREA,
 } from "./partition-options.js";
 import {
@@ -107,6 +114,7 @@ const currencySymbols = { TWD: "NT$", JPY: "¥", USD: "US$" };
 let state;
 let view = "plan";
 const calendarUi = calendarUI();
+const feeUi = managementFeeUI();
 let controlSwitchId = null;
 let showSourceOverlay = false;
 let lightingPreview = false;
@@ -224,11 +232,12 @@ function stateSnapshot(source = state) {
 }
 
 function updateUndoButton() {
-    undoButton.disabled = !state?.undo || conflicted || undoing || calendarUi.busy;
+    undoButton.disabled = !state?.undo || conflicted || undoing ||
+        calendarUi.busy || feeUi.busy;
     undoButton.textContent = view === "calendar"
-        ? "還原設備上一步（非日曆）" : "↶ 還原上一步";
-    content.inert = undoing || calendarUi.busy;
-    toolbar.inert = undoing || calendarUi.busy;
+        ? "還原設備上一步（非日曆／清潔費）" : "↶ 還原上一步";
+    content.inert = undoing || calendarUi.busy || feeUi.busy;
+    toolbar.inert = undoing || calendarUi.busy || feeUi.busy;
 }
 
 function resetActionTracking() {
@@ -394,7 +403,13 @@ function summary(items) {
 
 function renderTotals() {
     const totals = summary(state.items);
-    const overall = calculatePlanTotal(totals);
+    const overall = calculatePlanTotal(totals, state.managementCleaningFee);
+    const fee = managementFeeSummary(state.managementCleaningFee);
+    document.querySelector("#management-fee-budget").hidden = !fee.fee;
+    document.querySelector("#management-fee-total").textContent =
+        `NT$${currency.format(fee.totalTWD)}`;
+    document.querySelector("#management-fee-note").textContent =
+        managementFeeDescription(state.managementCleaningFee);
     const socketCount = state.items.filter(isSocket).length;
     const circuitCount = state.items.filter(isDedicatedCircuit).length;
     const points = electricalPointCounts(state.items);
@@ -3031,7 +3046,8 @@ function render() {
             view !== "survey" &&
             view !== "database" ? renderNewItemForm() : "") +
             (view === "calendar"
-                ? renderCalendar(state.constructionCalendar, calendarUi)
+                ? renderManagementFee(state.managementCleaningFee, feeUi) +
+                    renderCalendar(state.constructionCalendar, calendarUi)
             : sheetView ? renderElectricalSheet(state, view, controlSwitchId)
             : view === "survey" ? renderSurvey(survey, state.rooms)
             : view === "plan" ? renderPlanView()
@@ -3041,6 +3057,10 @@ function render() {
             bindCalendar(content.querySelector(".construction-calendar"),
                 state.constructionCalendar, calendarUi, {
                     render, save: saveCalendar, report: setStatus,
+                });
+            bindManagementFee(content.querySelector(".management-fee"),
+                state.managementCleaningFee, feeUi, {
+                    render, save: saveManagementFee, report: setStatus,
                 });
         }
         renderTotals();
@@ -3500,6 +3520,7 @@ async function save() {
         products: state.products,
         undo: state.undo ?? null,
         ...calendarFields(state),
+        ...managementFeeFields(state),
     };
     let finishSave;
     saveFinished = new Promise((resolve) => { finishSave = resolve; });
@@ -3542,9 +3563,9 @@ async function save() {
 }
 
 async function saveCalendar(constructionCalendar) {
-    if (invalidInputs.size || conflicted || undoing) {
+    if (invalidInputs.size || conflicted || undoing || feeUi.busy) {
         throw new Error(
-            "請先處理設備欄位錯誤或版本衝突，行事曆表單已保留。"
+            "請先處理設備／清潔費儲存或版本衝突，行事曆表單已保留。"
         );
     }
     toolbar.inert = true;
@@ -3562,6 +3583,7 @@ async function saveCalendar(constructionCalendar) {
             products: state.products,
             undo: state.undo,
             constructionCalendar,
+            ...managementFeeFields(state),
         });
         state = { ...result, products: result.products ?? [] };
         dirty = Boolean(result.storageWarning);
@@ -3577,13 +3599,58 @@ async function saveCalendar(constructionCalendar) {
     }
 }
 
+async function saveManagementFee(managementCleaningFee) {
+    if (invalidInputs.size || conflicted || undoing || calendarUi.busy) {
+        throw new Error(
+            "請先處理設備／日曆儲存或版本衝突，清潔費表單已保留。"
+        );
+    }
+    toolbar.inert = true;
+    try {
+        if (saving) await saveFinished;
+        if (dirty) await save();
+        if (dirty || conflicted) {
+            throw new Error(
+                "設備變更尚未安全儲存，未寫入清潔費。"
+            );
+        }
+        const result = await writePlannerState({
+            version: PLANNER_STATE_VERSION,
+            expectedRevision: state.revision,
+            rooms: state.rooms,
+            items: state.items,
+            products: state.products,
+            undo: state.undo,
+            ...calendarFields(state),
+            managementCleaningFee,
+        });
+        state = { ...result, products: result.products ?? [] };
+        dirty = Boolean(result.storageWarning);
+        resetActionTracking();
+        if (result.storageWarning) throw new Error(result.storageWarning);
+        setStatus(
+            "已儲存管委會清潔費；設備、工期及其各自復原未變。",
+            "saved"
+        );
+    } catch (error) {
+        conflicted = Boolean(error.conflict) || conflicted;
+        reloadButton.hidden = !conflicted;
+        throw error;
+    } finally {
+        toolbar.inert = false;
+    }
+}
+
 async function undoLastChange() {
     if (!state?.undo || undoing) {
         setStatus("目前沒有可還原的上一筆資料變更。", "error");
         return;
     }
-    if (invalidInputs.size || conflicted) {
-        setStatus("請先修正無效欄位或版本衝突，再還原上一步。", "error");
+    if (invalidInputs.size || conflicted || feeUi.busy) {
+        setStatus(
+            "請先修正無效欄位、結束清潔費儲存或處理版本衝突，再還原設備上一步。",
+            "error"
+        );
         return;
     }
     if ((pendingNewItem || pendingProduct) &&
@@ -3616,6 +3683,7 @@ async function undoLastChange() {
             products: previous.products,
             undo: null,
             ...calendarFields(state),
+            ...managementFeeFields(state),
         });
         state = { ...result, products: result.products ?? [] };
         dirty = Boolean(result.storageWarning);
@@ -5492,8 +5560,10 @@ function downloadItemList() {
 
 async function loadSave(file) {
     if (!file) return;
-    if (saving || calendarUi.busy || file.size > MAX_SAVE_BYTES) {
-        setStatus(saving || calendarUi.busy ? "目前正在儲存，請稍後再讀檔。" :
+    if (saving || calendarUi.busy || feeUi.busy ||
+        file.size > MAX_SAVE_BYTES) {
+        setStatus(saving || calendarUi.busy || feeUi.busy
+            ? "目前正在儲存，請稍後再讀檔。" :
             "JSON 存檔超過 4 MB，未改動目前規劃。", "error");
         return;
     }
@@ -5508,13 +5578,16 @@ async function loadSave(file) {
     const roomCount = imported.rooms.length;
     if (!window.confirm(`讀檔將以「${file.name}」的 ${roomCount} 間房、` +
         `${itemCount} 筆物件及 ${imported.products.length} 款商品，` +
-        "取代目前畫布規劃（包含未儲存的工項表單）。舊檔未附行事曆時保留現有行事曆；" +
+        "取代目前畫布規劃（包含未儲存的工項／費用表單）。" +
+        "舊檔未附管委會清潔費時保留現有費用及費用復原；" +
+        "含費用的檔案則取代，變更前費用保留為獨立上一步。" +
+        "舊檔未附行事曆時保留現有行事曆；" +
         "附有行事曆則取代並保留日曆獨立復原。舊版行事曆未含出席角色時，" +
         "保留相同工項 ID 的現有角色，其他工項未指定。確定嗎？")) return;
     clearTimeout(saveTimer);
-    const calendarOnly = state && hasCalendar(imported) &&
+    const equipmentUnchanged = state &&
         JSON.stringify(stateSnapshot(imported)) === JSON.stringify(stateSnapshot());
-    const prior = state ? calendarOnly ? state.undo : stateSnapshot() :
+    const prior = state ? equipmentUnchanged ? state.undo : stateSnapshot() :
         imported.undo ?? null;
     const importedCalendar = hasCalendar(imported)
         ? {
@@ -5539,9 +5612,11 @@ async function loadSave(file) {
             products: imported.products,
             undo: prior,
             ...importedCalendar,
+            ...importManagementFee(state, imported),
         });
         state = { ...updated, products: updated.products ?? [] };
         Object.assign(calendarUi, calendarUI());
+        Object.assign(feeUi, managementFeeUI());
         resetActionTracking();
         dirty = Boolean(updated.storageWarning);
         conflicted = false;
@@ -5591,13 +5666,14 @@ document.querySelector("#load-file-input").addEventListener("change", (event) =>
     if (file) void loadSave(file);
 });
 reloadButton.addEventListener("click", async () => {
-    if ((dirty || calendarUi.changed) &&
+    if ((dirty || calendarUi.changed || feeUi.changed) &&
         !window.confirm(
-            "重新載入會捨棄尚未儲存的設備變更與工項表單，確定嗎？"
+            "重新載入會捨棄尚未儲存的設備變更、工項與清潔費表單，確定嗎？"
         )) return;
     try {
         state = await fetchState();
         Object.assign(calendarUi, calendarUI());
+        Object.assign(feeUi, managementFeeUI());
         resetActionTracking();
         dirty = false;
         conflicted = false;
@@ -5656,13 +5732,16 @@ window.addEventListener("keydown", (event) => {
         event.key.toLowerCase() !== "z" ||
         event.target?.closest?.("input, textarea, select, [contenteditable]")) return;
     event.preventDefault();
-    if (view === "calendar") {
+    if (event.target?.closest?.(".management-fee")) {
+        content.querySelector("[data-fee-undo]:not(:disabled)")?.click();
+    } else if (view === "calendar") {
         content.querySelector("[data-calendar-undo]:not(:disabled)")?.click();
     } else void undoLastChange();
 });
 
 window.addEventListener("beforeunload", (event) => {
-    if (dirty || saving || undoing || calendarUi.changed || calendarUi.busy) {
+    if (dirty || saving || undoing || calendarUi.changed || calendarUi.busy ||
+        feeUi.changed || feeUi.busy) {
         event.preventDefault();
         event.returnValue = "";
     }
@@ -5670,10 +5749,12 @@ window.addEventListener("beforeunload", (event) => {
 
 async function refreshIfClean() {
     if (!state || dirty || saving || conflicted || pendingProduct ||
-        calendarUi.draft || calendarUi.busy || furnitureDrag || outdoorDrag) return;
+        calendarUi.draft || calendarUi.busy || feeUi.draft || feeUi.busy ||
+        furnitureDrag || outdoorDrag) return;
     try {
         const latest = await fetchState();
-        if (latest.revision > state.revision) {
+        if (!calendarUi.draft && !feeUi.draft && !dirty && !saving &&
+            latest.revision > state.revision) {
             state = latest;
             resetActionTracking();
             render();

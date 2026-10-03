@@ -1,6 +1,7 @@
 import hashlib
 import json
 import re
+import subprocess
 import unittest
 from pathlib import Path
 
@@ -39,6 +40,7 @@ class PublicSnapshotTests(unittest.TestCase):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         quote = QUOTE.read_text(encoding="utf-8")
         for value in ("51", "9", "7", "27,000", "51,500", "2,322,060.20",
+                      "2,333,060.20",
                       "16,000", "10 筆", "NT$0", "14,994", "3,960",
                       "26,936", "NT$6,600", "NT$13,200", "1,215",
                       "140,088", "21,032", "GPR-23HI", "4 坪內",
@@ -64,6 +66,14 @@ class PublicSnapshotTests(unittest.TestCase):
         self.assertIn("保護範圍、材料、管理許可與費用均待核", quote)
         self.assertIn("輕隔間廠商代表", readme)
         self.assertIn("代表，**不是工人**", quote)
+        for value in ("管委會施工期間清潔費", "110 個日曆日",
+                      "15 個週日", "NT$11,000", "NT$35,000",
+                      "managementFeeVersion: 1",
+                      "renovation-equipment-offline-management-fee-v1"):
+            with self.subTest(management_fee=value):
+                self.assertIn(value, readme)
+        self.assertIn("本版已知總額 NT$2,333,060.20", quote)
+        self.assertIn("週日固定休假只影響施工條顯示", quote)
         for value in ("完整展開", "24 個月", "師傅固定休假",
                       "週日例外安排", "藍色人形圖示", "週一續畫"):
             with self.subTest(calendar_display=value):
@@ -138,7 +148,7 @@ class PublicSnapshotTests(unittest.TestCase):
         state = json.loads(SAMPLE.read_text(encoding="utf-8"))
         self.assertEqual(set(state), {
             "version", "revision", "updatedAt", "rooms", "items", "products", "undo",
-            "constructionCalendar",
+            "constructionCalendar", "managementCleaningFee",
         })
         self.assertEqual((state["version"], state["revision"], state["undo"]), (5, 0, None))
         self.assertEqual(state["updatedAt"], "2026-01-01T00:00:00.000Z")
@@ -171,8 +181,7 @@ class PublicSnapshotTests(unittest.TestCase):
     def test_public_calendar_seed_has_thirteen_tentative_jobs_and_independent_undo(self):
         state = json.loads(SAMPLE.read_text(encoding="utf-8"))
         self.assertEqual(hashlib.sha256(SAMPLE.read_bytes()).hexdigest(),
-                         "413ae7ded2f0731" +
-                         "561630e032ec22c966850be87cc357a9c9f01b0f4407db1d6")
+                         "a0e9dec5cf9707262f10d2d18daadf3030943ba8e41fcd084ef5c30d13faf3a4")
         self.assertEqual((state["version"], state["revision"], state["undo"]),
                          (5, 0, None))
         calendar = state["constructionCalendar"]
@@ -220,13 +229,33 @@ class PublicSnapshotTests(unittest.TestCase):
                            if key != "attendees"} for event in
                           calendar["events"] if event["id"] !=
                           "construction-elevator-protection"])
-        self.assertIn("已知暫計 **NT$2,322,060.20**",
+        self.assertIn("物件已知暫計 **NT$2,322,060.20**",
                       (ROOT / "README.md").read_text(encoding="utf-8"))
+
+    def test_public_management_fee_is_only_new_sample_field(self):
+        current = json.loads(SAMPLE.read_text(encoding="utf-8"))
+        previous = json.loads(subprocess.check_output(
+            ["git", "show",
+             "b50ab2632334f98c03246c8a42c98400ca7e0604:files/設備規劃.json"],
+            cwd=ROOT))
+        self.assertEqual(
+            {key: value for key, value in current.items()
+             if key != "managementCleaningFee"}, previous)
+        self.assertEqual(current["managementCleaningFee"], {
+            "version": 1,
+            "fee": {
+                "start": "2026-10-13", "end": "2027-01-30", "dailyRate": 100,
+            },
+            "undo": {"fee": None},
+        })
+        self.assertEqual((current["revision"], current["undo"],
+                          len(current["constructionCalendar"]["events"]),
+                          len(current["constructionCalendar"]["undo"])),
+                         (0, None, 13, 12))
 
     def test_robot_is_unpriced_unlinked_and_does_not_create_outlets_or_switches(self):
         self.assertEqual(hashlib.sha256(SAMPLE.read_bytes()).hexdigest(),
-                         "413ae7ded2f0731" +
-                         "561630e032ec22c966850be87cc357a9c9f01b0f4407db1d6")
+                         "a0e9dec5cf9707262f10d2d18daadf3030943ba8e41fcd084ef5c30d13faf3a4")
         state = json.loads(SAMPLE.read_text(encoding="utf-8"))
         robot = state["items"][-1]
         self.assertEqual((robot["id"], robot["roomId"], robot["kind"],
@@ -678,7 +707,8 @@ class PublicSnapshotTests(unittest.TestCase):
                      "balcony-plan.js", "electrical-sheets.js",
                      "door-allocation.js", "robot-plan.js",
                      "construction-calendar.js", "calendar-reference.js",
-                     "calendar-view.js",
+                     "calendar-view.js", "management-fee.js",
+                     "management-fee-view.js",
                      "circuit-preview.js", "file-actions.js"):
             self.assertIn(f"assets/{name}", {entry["path"] for entry in bundle["modules"]})
         for name in ("corridor-plan.js", "air-conditioning-plan.js"):
@@ -707,10 +737,12 @@ class PublicSnapshotTests(unittest.TestCase):
         self.assertIn('renovation-equipment-offline-robot-v1:', bootstrap)
         self.assertIn('renovation-equipment-offline-calendar-v1:', bootstrap)
         self.assertIn('renovation-equipment-offline-calendar-attendees-v1:', bootstrap)
+        self.assertIn('renovation-equipment-offline-management-fee-v1:', bootstrap)
         self.assertIn('renovation-equipment-offline-v1:', bootstrap)
         self.assertIn("guardControlRelationsUpdate(current, candidate)", bootstrap)
         self.assertIn("guardRobotPlanUpdate(current, candidate)", bootstrap)
         self.assertIn("guardCalendarUpdate(current, candidate)", bootstrap)
+        self.assertIn("guardManagementFeeUpdate(current, candidate)", bootstrap)
         self.assertIn("calendarAttendeesVersion: CALENDAR_ATTENDEES_VERSION", (
             ROOT / "extensions" / "renovation-equipment" / "assets" /
             "state-transport.js").read_text(encoding="utf-8"))

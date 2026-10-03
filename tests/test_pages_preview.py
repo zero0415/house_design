@@ -43,6 +43,7 @@ def previous_public_robot_save():
     state = json.loads(SAMPLE.read_text(encoding="utf-8"))
     assert "constructionCalendar" in state
     del state["constructionCalendar"]
+    del state["managementCleaningFee"]
     state["items"] = [item for item in state["items"]
                       if item["id"] != "living-auto-water-robot"]
     assert len(state["items"]) == 181
@@ -51,6 +52,7 @@ def previous_public_robot_save():
 
 def previous_public_calendar_save():
     state = json.loads(SAMPLE.read_text(encoding="utf-8"))
+    del state["managementCleaningFee"]
     calendar = state["constructionCalendar"]
     assert calendar["version"] == 2 and len(calendar["events"]) == 13
     calendar["version"] = 1
@@ -272,6 +274,301 @@ class PagesPreviewTests(unittest.TestCase):
             self.assertEqual(errors, [])
         finally:
             context.close()
+
+    def test_public_management_fee_is_editable_independent_and_mobile_readable(self):
+        context = self.browser.new_context(
+            viewport={"width": 1280, "height": 960},
+            accept_downloads=True,
+        )
+        artifacts = os.environ.get("PUBLIC_FEE_ARTIFACTS")
+        if artifacts:
+            Path(artifacts).mkdir(parents=True, exist_ok=True)
+        try:
+            page = context.new_page()
+            requests, errors = [], []
+            page.on("request", lambda request: requests.append(
+                (request.method, request.url)) if request.url.startswith(
+                    ("http:", "https:")) else None)
+            page.on("pageerror", lambda error: errors.append(str(error)))
+            page.on("dialog", lambda dialog: dialog.accept())
+            self.open_demo(page)
+            initial = page.evaluate(
+                "globalThis.__RENOVATION_OFFLINE_STORE__.read()")
+            fee = initial["managementCleaningFee"]
+            self.assertEqual((initial["revision"], initial["undo"],
+                              len(initial["items"]),
+                              len(initial["constructionCalendar"]["events"])),
+                             (0, None, 182, 13))
+            self.assertEqual(fee, {
+                "version": 1,
+                "fee": {
+                    "start": "2026-10-13", "end": "2027-01-30",
+                    "dailyRate": 100,
+                },
+                "undo": {"fee": None},
+            })
+            self.assertEqual(page.locator("#quote-baseline").inner_text(),
+                             "NT$1,959,530")
+            self.assertEqual(page.locator("#overall-total").inner_text(),
+                             "NT$2,333,060.2")
+            self.assertEqual(page.locator("#management-fee-total").inner_text(),
+                             "NT$11,000")
+            self.assertTrue(page.locator("#management-fee-budget").is_visible())
+            item_additions = page.locator("#additional-total").inner_text()
+            page.get_by_role("tab", name="開工行事曆", exact=True).click()
+            self.assertIn("非日曆／清潔費",
+                          page.locator("#undo-last").inner_text())
+            self.assertIn("110 個日曆日（含 15 個週日）",
+                          page.locator(".management-fee-summary").inner_text())
+            self.assertIn("不取代原承包商",
+                          page.locator(".management-fee").inner_text())
+            self.assertEqual(page.locator(".calendar-agenda li").count(), 13)
+
+            cache_before = page.evaluate("JSON.stringify(localStorage)")
+            page.evaluate("""() => {
+                window.__feeViewWrites = [];
+                const setItem = Storage.prototype.setItem;
+                Storage.prototype.setItem = function(...args) {
+                    window.__feeViewWrites.push(args[0]);
+                    return setItem.apply(this, args);
+                };
+                const store = globalThis.__RENOVATION_OFFLINE_STORE__;
+                const update = store.update;
+                store.update = function(...args) {
+                    window.__feeViewWrites.push("store.update");
+                    return update.apply(this, args);
+                };
+            }""")
+            page.locator("[data-calendar-expand]").click()
+            self.assertEqual(page.locator(
+                "[data-calendar-month-view]").count(), 4)
+            page.locator("[data-fee-edit]").click()
+            form = page.locator("[data-fee-form]")
+            self.assertEqual(form.locator(
+                '[name="dailyRate"]').input_value(), "100")
+            cdp = context.new_cdp_session(page)
+            mobile = {}
+            for width in (1280, 320, 360, 390, 430):
+                page.set_viewport_size({"width": width, "height": 960})
+                cdp.send("Emulation.setDeviceMetricsOverride", {
+                    "width": width, "height": 960,
+                    "deviceScaleFactor": 1, "mobile": width < 600,
+                })
+                page.wait_for_function(
+                    "w => innerWidth === w && visualViewport.width === w",
+                    arg=width,
+                )
+                metrics = page.evaluate("""() => ({
+                    viewport: innerWidth,
+                    document: document.documentElement.scrollWidth,
+                    body: document.body.scrollWidth,
+                    inputs: [...document.querySelectorAll(
+                        '[data-fee-form] input')].map(node => ({
+                            font: parseFloat(getComputedStyle(node).fontSize),
+                            height: node.getBoundingClientRect().height,
+                        })),
+                    targets: [...document.querySelectorAll(
+                        '.management-fee button')].map(node =>
+                            node.getBoundingClientRect().height),
+                })""")
+                self.assertEqual(
+                    (metrics["document"], metrics["body"]),
+                    (width, width), (width, metrics))
+                self.assertTrue(all(row["font"] >= 16 and
+                                    row["height"] >= 44
+                                    for row in metrics["inputs"]),
+                                (width, metrics))
+                self.assertTrue(all(height >= 44
+                                    for height in metrics["targets"]),
+                                (width, metrics))
+                mobile[width] = metrics
+                if artifacts and width in (1280, 320, 390):
+                    page.locator(".management-fee").screenshot(
+                        path=str(Path(artifacts) /
+                                 f"pristine-chrome-fee-editor-{width}.png"))
+                    page.locator(".budget").screenshot(
+                        path=str(Path(artifacts) /
+                                 f"pristine-chrome-budget-{width}.png"))
+            cdp.send("Emulation.clearDeviceMetricsOverride")
+            page.set_viewport_size({"width": 1280, "height": 960})
+            self.assertEqual(page.evaluate(
+                "globalThis.__RENOVATION_OFFLINE_STORE__.read()"), initial)
+            self.assertEqual(page.evaluate("JSON.stringify(localStorage)"),
+                             cache_before)
+            self.assertEqual(page.evaluate("window.__feeViewWrites"), [])
+            form.locator("[data-fee-cancel]").click()
+            self.assertEqual(page.evaluate(
+                "globalThis.__RENOVATION_OFFLINE_STORE__.read()"), initial)
+            self.assertEqual(page.evaluate("window.__feeViewWrites"), [])
+
+            with page.expect_download() as download:
+                page.locator("[data-fee-csv]").click()
+            rows = list(csv.reader(Path(download.value.path()).read_text(
+                encoding="utf-8-sig").splitlines()))
+            self.assertEqual(len(rows), 2)
+            self.assertEqual(rows[1][1:8], [
+                "管委會", "2026-10-13", "2027-01-30",
+                "110", "15", "100", "11000",
+            ])
+            page.locator("[data-fee-edit]").click()
+            form = page.locator("[data-fee-form]")
+            form.locator('[name="start"]').fill("2026-10-25")
+            form.locator('[name="end"]').fill("2026-10-26")
+            form.locator('[name="dailyRate"]').fill("100.25")
+            self.assertIn("2 個日曆日（含 1 個週日）",
+                          form.locator(".fee-live-preview").inner_text())
+            self.assertEqual(page.evaluate(
+                "globalThis.__RENOVATION_OFFLINE_STORE__.read()"), initial)
+            form.get_by_role("button", name="儲存清潔費").click()
+            page.wait_for_function("""async () => {
+                const state = await globalThis.__RENOVATION_OFFLINE_STORE__.read();
+                return state.revision === 1 &&
+                    state.managementCleaningFee.fee.dailyRate === 100.25;
+            }""", timeout=15000)
+            edited = page.evaluate(
+                "globalThis.__RENOVATION_OFFLINE_STORE__.read()")
+            for key in ("rooms", "items", "products", "undo",
+                        "constructionCalendar"):
+                self.assertEqual(edited[key], initial[key])
+            self.assertEqual(edited["managementCleaningFee"]["undo"]["fee"],
+                             fee["fee"])
+            self.assertEqual(page.locator("#management-fee-total").inner_text(),
+                             "NT$200.5")
+            self.assertEqual(page.locator("#overall-total").inner_text(),
+                             "NT$2,322,260.7")
+            self.assertEqual(page.locator("#additional-total").inner_text(),
+                             item_additions)
+            page.locator("[data-fee-undo]").click()
+            page.wait_for_function("""async () => {
+                const state = await globalThis.__RENOVATION_OFFLINE_STORE__.read();
+                return state.revision === 2 &&
+                    state.managementCleaningFee.undo === null;
+            }""", timeout=15000)
+            restored = page.evaluate(
+                "globalThis.__RENOVATION_OFFLINE_STORE__.read()")
+            self.assertEqual(restored["managementCleaningFee"]["fee"],
+                             fee["fee"])
+            self.assertEqual(restored["constructionCalendar"],
+                             initial["constructionCalendar"])
+            self.assertIsNone(restored["undo"])
+            self.assertEqual(page.locator("#overall-total").inner_text(),
+                             "NT$2,333,060.2")
+
+            prior = {key: value for key, value in initial.items()
+                     if key != "managementCleaningFee"}
+            page.locator("#load-file-input").set_input_files({
+                "name": "public-calendar-v10.json",
+                "mimeType": "application/json",
+                "buffer": json.dumps({
+                    "format": "renovation-equipment-planner",
+                    "formatVersion": 10, "state": prior,
+                }, ensure_ascii=False).encode("utf-8"),
+            })
+            page.wait_for_function("""async () =>
+                (await globalThis.__RENOVATION_OFFLINE_STORE__.read())
+                    .revision === 3
+            """, timeout=15000)
+            imported = page.evaluate(
+                "globalThis.__RENOVATION_OFFLINE_STORE__.read()")
+            self.assertEqual(imported["managementCleaningFee"],
+                             restored["managementCleaningFee"])
+            self.assertEqual(imported["constructionCalendar"],
+                             initial["constructionCalendar"])
+            self.assertEqual(imported["items"], initial["items"])
+            self.assertEqual(page.locator("#overall-total").inner_text(),
+                             "NT$2,333,060.2")
+            self.assertTrue(all(method == "GET" and
+                                url.startswith(self.base)
+                                for method, url in requests), requests)
+            self.assertEqual(errors, [])
+            if artifacts:
+                (Path(artifacts) / "chrome-fee-metrics.json").write_text(
+                    json.dumps(mobile, ensure_ascii=False, indent=2),
+                    encoding="utf-8",
+                )
+        finally:
+            context.close()
+
+    def test_management_fee_cache_prefers_latest_without_seeding_old_edits(self):
+        current = json.loads(SAMPLE.read_text(encoding="utf-8"))
+        previous = deepcopy(current)
+        del previous["managementCleaningFee"]
+        previous["revision"] = 7
+        previous["constructionCalendar"]["events"][0]["title"] = (
+            "舊離線自訂工項")
+        edited = deepcopy(current)
+        edited["revision"] = 9
+        edited["managementCleaningFee"]["fee"]["dailyRate"] = 125
+        for case, latest in (
+            ("older-only", None),
+            ("newer-wins", json.dumps(edited, ensure_ascii=False)),
+            ("newer-corrupt", "{broken"),
+        ):
+            with self.subTest(case=case):
+                context = self.browser.new_context()
+                try:
+                    context.add_init_script("""if (
+                        location.pathname.includes('/portable/') &&
+                        !localStorage.getItem('fee-cache-test-seeded')) {
+                        localStorage.setItem(
+                            'renovation-equipment-offline-calendar-attendees-v1:' +
+                                location.pathname, %s);
+                        if (%s !== null) localStorage.setItem(
+                            'renovation-equipment-offline-management-fee-v1:' +
+                                location.pathname, %s);
+                        localStorage.setItem('fee-cache-test-seeded', '1');
+                    }""" % (
+                        json.dumps(json.dumps(previous, ensure_ascii=False)),
+                        json.dumps(latest), json.dumps(latest),
+                    ))
+                    page = context.new_page()
+                    requests = []
+                    page.on("request", lambda request:
+                            requests.append(request.url)
+                            if "/files/" in request.url else None)
+                    if case == "newer-corrupt":
+                        page.goto(self.base)
+                        page.wait_for_url("**/portable/*demo=pages*")
+                        page.wait_for_function(
+                            "document.querySelector('#save-status')?.dataset.kind === 'error'")
+                        self.assertIn("暫存資料無法驗證",
+                                      page.locator("#save-status").inner_text())
+                        self.assertEqual(page.evaluate(
+                            "localStorage.getItem('renovation-equipment-offline-management-fee-v1:' + location.pathname)"
+                        ), "{broken")
+                    else:
+                        self.open_demo(page)
+                        state = page.evaluate(
+                            "globalThis.__RENOVATION_OFFLINE_STORE__.read()")
+                        if case == "older-only":
+                            self.assertEqual(state["revision"], 7)
+                            self.assertNotIn("managementCleaningFee", state)
+                            self.assertTrue(page.locator(
+                                "#management-fee-budget").is_hidden())
+                            page.get_by_role(
+                                "tab", name="開工行事曆",
+                                exact=True).click()
+                            self.assertIn("未設定／未計入", page.locator(
+                                ".management-fee-summary").inner_text())
+                            self.assertEqual(json.loads(page.evaluate(
+                                "localStorage.getItem('renovation-equipment-offline-management-fee-v1:' + location.pathname)"
+                            )), state)
+                        else:
+                            self.assertEqual(state["revision"], 9)
+                            self.assertEqual(state["managementCleaningFee"]
+                                             ["fee"]["dailyRate"], 125)
+                            self.assertEqual(page.locator(
+                                "#management-fee-total").inner_text(),
+                                "NT$13,750")
+                            self.assertEqual(page.locator(
+                                "#overall-total").inner_text(),
+                                "NT$2,335,810.2")
+                    self.assertEqual(json.loads(page.evaluate(
+                        "localStorage.getItem('renovation-equipment-offline-calendar-attendees-v1:' + location.pathname)"
+                    )), previous)
+                    self.assertEqual(requests, [])
+                finally:
+                    context.close()
 
     def test_calendar_expanded_sundays_and_role_bars_keep_pristine_state(self):
         context = self.browser.new_context(
@@ -524,7 +821,7 @@ class PagesPreviewTests(unittest.TestCase):
                              (pristine["rooms"], pristine["items"],
                               pristine["products"], pristine["undo"]))
             self.assertEqual(page.locator("#overall-total").inner_text(),
-                             "NT$2,322,060.2")
+                             "NT$2,333,060.2")
             self.assertEqual(errors, [])
         finally:
             context.close()
@@ -562,7 +859,7 @@ class PagesPreviewTests(unittest.TestCase):
             self.assertEqual(sum(not entry["attendees"] for entry in
                                  calendar["events"]), 11)
             self.assertEqual(page.locator("#overall-total").inner_text(),
-                             "NT$2,322,060.2")
+                             "NT$2,333,060.2")
             budget = page.locator(".budget").inner_text()
             page.get_by_role("tab", name="開工行事曆", exact=True).click()
             self.assertEqual(page.locator(".calendar-agenda li").count(), 13)
@@ -642,7 +939,7 @@ class PagesPreviewTests(unittest.TestCase):
             self.assertEqual(edited["rooms"], initial["rooms"])
             self.assertEqual(edited["products"], initial["products"])
             self.assertEqual(page.locator("#overall-total").inner_text(),
-                             "NT$2,322,060.2")
+                             "NT$2,333,060.2")
             self.assertEqual(page.locator(".budget").inner_text(), budget)
             self.assertEqual(next(entry for entry in
                                   edited["constructionCalendar"]["undo"]
@@ -659,7 +956,7 @@ class PagesPreviewTests(unittest.TestCase):
                 page.locator("#save-file").click()
             exported = json.loads(Path(
                 download.value.path()).read_text(encoding="utf-8"))
-            self.assertEqual(exported["formatVersion"], 10)
+            self.assertEqual(exported["formatVersion"], 11)
             self.assertEqual(exported["state"]["constructionCalendar"],
                              edited["constructionCalendar"])
             page.reload()
@@ -726,6 +1023,7 @@ class PagesPreviewTests(unittest.TestCase):
              ]
         robot = json.loads(SAMPLE.read_text(encoding="utf-8"))
         del robot["constructionCalendar"]
+        del robot["managementCleaningFee"]
         cases = (
             ("renovation-equipment-offline-v1", previous_public_balcony_save(),
              179),
@@ -817,9 +1115,10 @@ class PagesPreviewTests(unittest.TestCase):
             self.assertTrue(all("attendees" not in event for event in
                                 loaded["constructionCalendar"]["events"]))
             copied = json.loads(page.evaluate(
-                "localStorage.getItem('renovation-equipment-offline-calendar-attendees-v1:' + location.pathname)"
+                "localStorage.getItem('renovation-equipment-offline-management-fee-v1:' + location.pathname)"
             ))
             self.assertEqual(copied["constructionCalendar"]["version"], 1)
+            self.assertNotIn("managementCleaningFee", copied)
             self.assertIsNotNone(page.evaluate(
                 "localStorage.getItem('renovation-equipment-offline-calendar-v1:' + location.pathname)"
             ))
@@ -932,7 +1231,7 @@ class PagesPreviewTests(unittest.TestCase):
             page.on("pageerror", lambda error: errors.append(str(error)))
             self.open_demo(page)
             self.assertEqual(page.locator(".overview-svg .plan-zone").count(), 13)
-            self.assertEqual(page.locator("#overall-total").inner_text(), "NT$2,322,060.2")
+            self.assertEqual(page.locator("#overall-total").inner_text(), "NT$2,333,060.2")
             self.assertEqual(page.locator(".overview-svg [data-outlet-point-id]").count(), 67)
             for prefix, count in (("R", 51), ("B", 9), ("C", 7)):
                 self.assertEqual(page.locator(
@@ -953,6 +1252,9 @@ class PagesPreviewTests(unittest.TestCase):
             self.assertIsNone(page.evaluate(
                 "localStorage.getItem('renovation-equipment-offline-calendar-attendees-v1:' + location.pathname)"
             ))
+            self.assertIsNone(page.evaluate(
+                "localStorage.getItem('renovation-equipment-offline-management-fee-v1:' + location.pathname)"
+            ))
             page.locator('.overview-svg .plan-zone[data-select-room="bedroom-1"]').click()
             height = page.locator(
                 'input[data-room-dimension="ceilingHeightCm"][data-room-id="bedroom-1"]'
@@ -961,7 +1263,7 @@ class PagesPreviewTests(unittest.TestCase):
             height.press("Tab")
             page.wait_for_function("""() => {
                 const saved = localStorage.getItem(
-                    'renovation-equipment-offline-calendar-attendees-v1:' + location.pathname);
+                    'renovation-equipment-offline-management-fee-v1:' + location.pathname);
                 return saved && JSON.parse(saved).rooms.find(
                     room => room.id === 'bedroom-1').ceilingHeightCm === 270;
             }""", timeout=15000)
@@ -998,7 +1300,7 @@ class PagesPreviewTests(unittest.TestCase):
             self.assertEqual((len(state["items"]), len(state["products"]),
                               state["revision"], state["undo"]), (182, 28, 0, None))
             self.assertEqual(page.locator("#overall-total").inner_text(),
-                             "NT$2,322,060.2")
+                             "NT$2,333,060.2")
             overview = page.locator(".overview-svg")
             self.assertEqual(overview.locator(".fixed-balcony-sink").count(), 1)
             self.assertEqual(overview.locator(
@@ -1100,7 +1402,7 @@ class PagesPreviewTests(unittest.TestCase):
                 page.wait_for_function("Boolean(globalThis.__RENOVATION_OFFLINE_STORE__)")
                 page.locator("#load-file-input").set_input_files(str(SAMPLE))
                 page.wait_for_function(
-                    "document.querySelector('#overall-total').textContent.includes('2,322,060')",
+                    "document.querySelector('#overall-total').textContent.includes('2,333,060')",
                     timeout=15000,
                 )
                 for tab_name in ("插座配置圖", "燈具配置圖"):
@@ -1412,7 +1714,7 @@ class PagesPreviewTests(unittest.TestCase):
                 self.assertIsNotNone(imported["undo"])
                 budget = page.locator(".budget").inner_text()
                 storage_before = page.evaluate(
-                    "localStorage.getItem('renovation-equipment-offline-calendar-attendees-v1:' + location.pathname)"
+                    "localStorage.getItem('renovation-equipment-offline-management-fee-v1:' + location.pathname)"
                 )
                 page.get_by_role("tab", name="插座配置圖", exact=True).click()
                 self.assertEqual(page.locator("[data-sheet-point]").count(), 67)
@@ -1428,7 +1730,7 @@ class PagesPreviewTests(unittest.TestCase):
                     "globalThis.__RENOVATION_OFFLINE_STORE__.read()"), imported)
                 self.assertEqual(page.locator(".budget").inner_text(), budget)
                 self.assertEqual(page.evaluate(
-                    "localStorage.getItem('renovation-equipment-offline-calendar-attendees-v1:' + location.pathname)"
+                    "localStorage.getItem('renovation-equipment-offline-management-fee-v1:' + location.pathname)"
                 ), storage_before)
                 with page.expect_download() as download:
                     page.locator("#save-file").click()
@@ -1481,6 +1783,9 @@ class PagesPreviewTests(unittest.TestCase):
             self.assertIsNone(page.evaluate(
                 "localStorage.getItem('renovation-equipment-offline-calendar-attendees-v1:' + location.pathname)"
             ))
+            self.assertIsNone(page.evaluate(
+                "localStorage.getItem('renovation-equipment-offline-management-fee-v1:' + location.pathname)"
+            ))
             page.locator('[data-action="toggle-light-preview"]').click()
             self.assertEqual(page.locator("[data-preview-light-id]").count(), 0)
             page.locator('[data-preview-item-id="quoted-switch-01"]').click()
@@ -1512,6 +1817,9 @@ class PagesPreviewTests(unittest.TestCase):
             self.assertIsNone(page.evaluate(
                 "localStorage.getItem('renovation-equipment-offline-calendar-attendees-v1:' + location.pathname)"
             ))
+            self.assertIsNone(page.evaluate(
+                "localStorage.getItem('renovation-equipment-offline-management-fee-v1:' + location.pathname)"
+            ))
             page.locator("#control-relations-form button").click()
             page.wait_for_function("""async () => {
                 const state = await globalThis.__RENOVATION_OFFLINE_STORE__.read();
@@ -1537,7 +1845,7 @@ class PagesPreviewTests(unittest.TestCase):
                 "localStorage.getItem('renovation-equipment-offline-v1:' + location.pathname)"
             ))
             stored = json.loads(page.evaluate(
-                "localStorage.getItem('renovation-equipment-offline-calendar-attendees-v1:' + location.pathname)"
+                "localStorage.getItem('renovation-equipment-offline-management-fee-v1:' + location.pathname)"
             ))
             self.assertEqual(stored["revision"], 1)
 
@@ -1545,7 +1853,7 @@ class PagesPreviewTests(unittest.TestCase):
                 page.locator("#save-file").click()
             exported = json.loads(Path(
                 download.value.path()).read_text(encoding="utf-8"))
-            self.assertEqual(exported["formatVersion"], 10)
+            self.assertEqual(exported["formatVersion"], 11)
             self.assertEqual(exported["state"]["items"], updated["items"])
             self.assertEqual(exported["state"]["undo"], updated["undo"])
             page.reload()
@@ -1605,7 +1913,7 @@ class PagesPreviewTests(unittest.TestCase):
                 try {
                     await globalThis.__RENOVATION_OFFLINE_STORE__.update({
                         ...malformed, expectedRevision: original.revision, undo: null,
-                        controlRelationsVersion: 1, doorAllocationVersion: 1, robotFeatureVersion: 1, calendarFeatureVersion: 1, calendarAttendeesVersion: 1,
+                        controlRelationsVersion: 1, doorAllocationVersion: 1, robotFeatureVersion: 1, calendarFeatureVersion: 1, calendarAttendeesVersion: 1, managementFeeVersion: 1,
                     });
                 } catch (error) { weakRejected = /弱電|來源標位/.test(error.message); }
                 const overview = renderOverviewPlan(original.rooms,original.items);
@@ -1805,7 +2113,7 @@ class PagesPreviewTests(unittest.TestCase):
                 page.wait_for_function("Boolean(globalThis.__RENOVATION_OFFLINE_STORE__)")
                 page.locator("#load-file-input").set_input_files(str(SAMPLE))
                 page.wait_for_function(
-                    "document.querySelector('#overall-total').textContent.includes('2,322,060')",
+                    "document.querySelector('#overall-total').textContent.includes('2,333,060')",
                     timeout=15000,
                 )
                 page.locator('.plan-zone[data-select-room="kitchen"]').click()
@@ -1996,7 +2304,7 @@ class PagesPreviewTests(unittest.TestCase):
                         applyProductToItem(repriced,item) : item);
                 const saved = await globalThis.__RENOVATION_OFFLINE_STORE__.update({
                     ...changed,expectedRevision:original.revision,undo:null,
-                    controlRelationsVersion:1,doorAllocationVersion:1,robotFeatureVersion:1,calendarFeatureVersion:1,calendarAttendeesVersion:1});
+                    controlRelationsVersion:1,doorAllocationVersion:1,robotFeatureVersion:1,calendarFeatureVersion:1,calendarAttendeesVersion:1,managementFeeVersion:1});
                 const after = calculatePlanTotal(calculateBudget(saved.items,
                     {wholePlan:true})).TWD;
                 const exported = decodeSave(encodeSave(saved));
@@ -2057,7 +2365,7 @@ class PagesPreviewTests(unittest.TestCase):
                     if request.url.startswith(("http:", "https:")) else None)
             self.open_demo(page)
             self.assertEqual(page.locator("#overall-total").inner_text(),
-                             "NT$2,322,060.2")
+                             "NT$2,333,060.2")
             note = page.locator("details.quote-intro")
             self.assertEqual(note.count(), 1)
             self.assertIsNone(note.get_attribute("open"))
@@ -2186,7 +2494,7 @@ class PagesPreviewTests(unittest.TestCase):
                 try {
                     await globalThis.__RENOVATION_OFFLINE_STORE__.update({
                         ...invalid,expectedRevision:source.revision,undo:null,
-                        controlRelationsVersion:1,doorAllocationVersion:1,robotFeatureVersion:1,calendarFeatureVersion:1,calendarAttendeesVersion:1,
+                        controlRelationsVersion:1,doorAllocationVersion:1,robotFeatureVersion:1,calendarFeatureVersion:1,calendarAttendeesVersion:1,managementFeeVersion:1,
                     });
                 } catch (error) {
                     invalidStateRejected = /室外|窗位|產品/.test(error.message);
@@ -2333,7 +2641,7 @@ class PagesPreviewTests(unittest.TestCase):
                 }
                 const saved = await globalThis.__RENOVATION_OFFLINE_STORE__.update({
                     ...changed,expectedRevision:source.revision,undo:null,
-                    controlRelationsVersion:1,doorAllocationVersion:1,robotFeatureVersion:1,calendarFeatureVersion:1,calendarAttendeesVersion:1,
+                    controlRelationsVersion:1,doorAllocationVersion:1,robotFeatureVersion:1,calendarFeatureVersion:1,calendarAttendeesVersion:1,managementFeeVersion:1,
                 });
                 const root = new URL('../extensions/renovation-equipment/assets/',
                     location.href);
@@ -2481,7 +2789,7 @@ class PagesPreviewTests(unittest.TestCase):
                     product.id && linkedProductMismatch(repriced,item));
                 const changed = await globalThis.__RENOVATION_OFFLINE_STORE__.update({
                     ...updated,expectedRevision:source.revision,undo:null,
-                    controlRelationsVersion:1,doorAllocationVersion:1,robotFeatureVersion:1,calendarFeatureVersion:1,calendarAttendeesVersion:1,
+                    controlRelationsVersion:1,doorAllocationVersion:1,robotFeatureVersion:1,calendarFeatureVersion:1,calendarAttendeesVersion:1,managementFeeVersion:1,
                 });
                 const budgetAfter = calculatePlanTotal(calculateBudget(changed.items,
                     {wholePlan:true})).TWD;
@@ -2492,7 +2800,7 @@ class PagesPreviewTests(unittest.TestCase):
                 try {
                     await globalThis.__RENOVATION_OFFLINE_STORE__.update({
                         ...invalid,expectedRevision:changed.revision,undo:null,
-                        controlRelationsVersion:1,doorAllocationVersion:1,robotFeatureVersion:1,calendarFeatureVersion:1,calendarAttendeesVersion:1});
+                        controlRelationsVersion:1,doorAllocationVersion:1,robotFeatureVersion:1,calendarFeatureVersion:1,calendarAttendeesVersion:1,managementFeeVersion:1});
                 } catch (error) {
                     extraRejected = /衛浴器具安裝費須為 0/.test(error.message);
                 }
@@ -2504,7 +2812,7 @@ class PagesPreviewTests(unittest.TestCase):
                 try {
                     await globalThis.__RENOVATION_OFFLINE_STORE__.update({
                         ...invalid,expectedRevision:changed.revision,undo:null,
-                        controlRelationsVersion:1,doorAllocationVersion:1,robotFeatureVersion:1,calendarFeatureVersion:1,calendarAttendeesVersion:1});
+                        controlRelationsVersion:1,doorAllocationVersion:1,robotFeatureVersion:1,calendarFeatureVersion:1,calendarAttendeesVersion:1,managementFeeVersion:1});
                 } catch (error) {
                     specialRejected = /只有燈具或原報已含/.test(error.message);
                 }
@@ -2521,7 +2829,7 @@ class PagesPreviewTests(unittest.TestCase):
                         'bath-main-toilet'),
                     extraRejected,specialRejected,
                     stillSaved:JSON.parse(localStorage.getItem(
-                        'renovation-equipment-offline-calendar-attendees-v1:' + location.pathname))
+                        'renovation-equipment-offline-management-fee-v1:' + location.pathname))
                         .items.find(item => item.id ===
                             'bath-main-heated-towel-rail').installationUnitPrice,
                 };
@@ -2560,7 +2868,7 @@ class PagesPreviewTests(unittest.TestCase):
             )
             page.locator("#load-file-input").set_input_files(str(SAMPLE))
             page.wait_for_function(
-                "document.querySelector('#overall-total').textContent.includes('2,322,060')",
+                "document.querySelector('#overall-total').textContent.includes('2,333,060')",
                 timeout=15000,
             )
             with page.expect_download() as downloaded:
@@ -2773,7 +3081,7 @@ class PagesPreviewTests(unittest.TestCase):
                              stored["items"] if item["id"] == "bath-main-toilet"))
             self.assertEqual(stored["revision"], 7)
             copied = json.loads(page.evaluate(
-                "localStorage.getItem('renovation-equipment-offline-calendar-attendees-v1:' + location.pathname)"
+                "localStorage.getItem('renovation-equipment-offline-management-fee-v1:' + location.pathname)"
             ))
             self.assertEqual(copied["revision"], 7)
             self.assertIsNone(page.evaluate(
@@ -2797,7 +3105,7 @@ class PagesPreviewTests(unittest.TestCase):
             self.assertEqual(page.locator("#quote-baseline").inner_text(),
                              "NT$1,959,530")
             self.assertEqual(page.locator("#overall-total").inner_text(),
-                             "NT$2,322,060.2")
+                             "NT$2,333,060.2")
             for door_id, kind in (
                 ("main-bath-master", "swing"),
                 ("main-bath-hall", "swing"),
@@ -2880,7 +3188,7 @@ class PagesPreviewTests(unittest.TestCase):
                 page.locator("#save-file").click()
             exported = json.loads(Path(
                 download.value.path()).read_text(encoding="utf-8"))
-            self.assertEqual(exported["formatVersion"], 10)
+            self.assertEqual(exported["formatVersion"], 11)
             self.assertEqual(exported["state"]["items"], original["items"])
             self.assertIsNone(exported["state"]["undo"])
             page.locator('[data-plan-room-select]').select_option("bath-main")
@@ -2899,7 +3207,7 @@ class PagesPreviewTests(unittest.TestCase):
             changed = page.evaluate("globalThis.__RENOVATION_OFFLINE_STORE__.read()")
             self.assertEqual(changed["undo"]["items"], original["items"])
             self.assertEqual(page.locator("#overall-total").inner_text(),
-                             "NT$2,318,560.2")
+                             "NT$2,329,560.2")
             page.locator("#undo-last").click()
             page.wait_for_function("""async () => {
                 const state = await globalThis.__RENOVATION_OFFLINE_STORE__.read();
@@ -2907,7 +3215,7 @@ class PagesPreviewTests(unittest.TestCase):
                     item.id === 'door-main-bath-master').unitPrice === 14000;
             }""", timeout=15000)
             self.assertEqual(page.locator("#overall-total").inner_text(),
-                             "NT$2,322,060.2")
+                             "NT$2,333,060.2")
             self.assertEqual(errors, [])
         finally:
             context.close()
@@ -2934,7 +3242,7 @@ class PagesPreviewTests(unittest.TestCase):
                                  "outletCircuit", "circuitOutletId")))
             self.assertNotIn("outletPlanPointId", robot)
             self.assertEqual(page.locator("#overall-total").inner_text(),
-                             "NT$2,322,060.2")
+                             "NT$2,333,060.2")
             marker = page.locator(
                 '.overview-svg [data-robot-id="living-auto-water-robot"]'
             )
@@ -3030,7 +3338,7 @@ class PagesPreviewTests(unittest.TestCase):
                     '.overview-svg [data-robot-id="living-auto-water-robot"]'
                 ).count(), 1)
                 self.assertEqual(page.locator("#overall-total").inner_text(),
-                                 "NT$2,322,060.2")
+                                 "NT$2,333,060.2")
                 page.locator(
                     '.overview-svg .plan-zone[data-select-room="living-dining"]'
                 ).click()
@@ -3070,15 +3378,15 @@ class PagesPreviewTests(unittest.TestCase):
                                        "living-auto-water-robot")["unitPrice"])
                 self.assertEqual(edited["undo"]["items"], original["items"])
                 self.assertEqual(page.locator("#overall-total").inner_text(),
-                                 "NT$2,322,060.2")
+                                 "NT$2,333,060.2")
                 self.assertIsNotNone(page.evaluate(
-                    "localStorage.getItem('renovation-equipment-offline-calendar-attendees-v1:' + location.pathname)"
+                    "localStorage.getItem('renovation-equipment-offline-management-fee-v1:' + location.pathname)"
                 ))
                 with page.expect_download() as download:
                     page.locator("#save-file").click()
                 exported = json.loads(Path(
                     download.value.path()).read_text(encoding="utf-8"))
-                self.assertEqual(exported["formatVersion"], 10)
+                self.assertEqual(exported["formatVersion"], 11)
                 self.assertEqual(exported["state"]["items"], edited["items"])
                 page.locator("#undo-last").click()
                 page.wait_for_function("""async () => {
@@ -3087,7 +3395,7 @@ class PagesPreviewTests(unittest.TestCase):
                         entry.id === 'living-auto-water-robot').brandModel === null;
                 }""", timeout=15000)
                 self.assertEqual(page.locator("#overall-total").inner_text(),
-                                 "NT$2,322,060.2")
+                                 "NT$2,333,060.2")
                 self.assertEqual(remote, [])
                 self.assertEqual(errors, [])
             finally:
@@ -3146,7 +3454,7 @@ class PagesPreviewTests(unittest.TestCase):
             self.assertEqual(next(room for room in loaded["rooms"] if room["id"] ==
                                   "kitchen")["ceilingHeightCm"], 275)
             copied = json.loads(page.evaluate(
-                "localStorage.getItem('renovation-equipment-offline-calendar-attendees-v1:' + location.pathname)"
+                "localStorage.getItem('renovation-equipment-offline-management-fee-v1:' + location.pathname)"
             ))
             self.assertEqual(copied["items"], loaded["items"])
             self.assertIsNotNone(page.evaluate(
@@ -3205,7 +3513,7 @@ class PagesPreviewTests(unittest.TestCase):
                 )
                 current_page.locator("#load-file-input").set_input_files(str(SAMPLE))
                 current_page.wait_for_function(
-                    "document.querySelector('#overall-total').textContent.includes('2,322,060')",
+                    "document.querySelector('#overall-total').textContent.includes('2,333,060')",
                     timeout=15000,
                 )
                 self.assertEqual(current_page.locator(
@@ -3280,7 +3588,7 @@ class PagesPreviewTests(unittest.TestCase):
                     '.overview-svg [data-plan-door-id="main-bath-hall"]'
                 ).get_attribute("class").split())
                 copied = json.loads(page.evaluate(
-                    "localStorage.getItem('renovation-equipment-offline-calendar-attendees-v1:' + location.pathname)"
+                    "localStorage.getItem('renovation-equipment-offline-management-fee-v1:' + location.pathname)"
                 ))
                 self.assertEqual(copied["items"], saved["items"])
                 page.get_by_role("tab", name="燈具配置圖", exact=True).click()
@@ -3346,7 +3654,7 @@ class PagesPreviewTests(unittest.TestCase):
             )
             page.locator("#load-file-input").set_input_files(str(SAMPLE))
             page.wait_for_function(
-                "document.querySelector('#overall-total').textContent.includes('2,322,060')",
+                "document.querySelector('#overall-total').textContent.includes('2,333,060')",
                 timeout=15000,
             )
             with page.expect_download() as download:
@@ -3363,7 +3671,7 @@ class PagesPreviewTests(unittest.TestCase):
             saved = json.loads(Path(download.value.path()).read_text(encoding="utf-8"))
             self.assertEqual((saved["formatVersion"], len(saved["state"]["items"]),
                               len(saved["state"]["products"]), saved["state"]["undo"]),
-                             (10, 182, 28, None))
+                             (11, 182, 28, None))
             page.locator('.overview-svg .plan-zone[data-select-room="kitchen"]').click()
             self.assertEqual(page.locator(
                 '.room-svg [data-marker-id^="kitchen-plan-"]').count(), 12)
@@ -3385,7 +3693,7 @@ class PagesPreviewTests(unittest.TestCase):
                 return state.rooms.find(room => room.id === 'kitchen').ceilingHeightCm ===
                     null && state.items.length === 182;
             }""", timeout=15000)
-            self.assertEqual(page.locator("#overall-total").inner_text(), "NT$2,322,060.2")
+            self.assertEqual(page.locator("#overall-total").inner_text(), "NT$2,333,060.2")
         finally:
             context.close()
 
@@ -3414,7 +3722,7 @@ class PagesPreviewTests(unittest.TestCase):
             gas = next(item for item in rotated["items"] if item["id"] ==
                        "kitchen-plan-gas")
             self.assertIsNone(gas["unitPrice"])
-            self.assertEqual(page.locator("#overall-total").inner_text(), "NT$2,322,060.2")
+            self.assertEqual(page.locator("#overall-total").inner_text(), "NT$2,333,060.2")
             page.locator("#undo-last").click()
             page.wait_for_function("""async () => {
                 const state = await globalThis.__RENOVATION_OFFLINE_STORE__.read();
@@ -3453,7 +3761,7 @@ class PagesPreviewTests(unittest.TestCase):
             page.locator("#save-now").click()
             page.wait_for_function("""original => {
                 const saved = localStorage.getItem(
-                    'renovation-equipment-offline-calendar-attendees-v1:' + location.pathname);
+                    'renovation-equipment-offline-management-fee-v1:' + location.pathname);
                 if (!saved) return false;
                 const moved = JSON.parse(saved).items.find(item =>
                     item.id === 'kitchen-plan-ih').placement;
@@ -3467,7 +3775,7 @@ class PagesPreviewTests(unittest.TestCase):
                 return Math.abs(restored.x-original.x) +
                     Math.abs(restored.y-original.y) < .000001;
             }""", arg=original, timeout=15000)
-            self.assertEqual(page.locator("#overall-total").inner_text(), "NT$2,322,060.2")
+            self.assertEqual(page.locator("#overall-total").inner_text(), "NT$2,333,060.2")
         finally:
             context.close()
 
@@ -3538,7 +3846,7 @@ class PagesPreviewTests(unittest.TestCase):
                 const state = await globalThis.__RENOVATION_OFFLINE_STORE__.read();
                 state.rooms.find(room => room.id === 'bedroom-1').ceilingHeightCm = 240;
                 localStorage.setItem(
-                    'renovation-equipment-offline-calendar-attendees-v1:' + location.pathname,
+                    'renovation-equipment-offline-management-fee-v1:' + location.pathname,
                     JSON.stringify(state));
             }""")
             page.locator('.overview-svg .plan-zone[data-select-room="bedroom-1"]').click()
@@ -3552,7 +3860,7 @@ class PagesPreviewTests(unittest.TestCase):
                 timeout=15000,
             )
             saved = json.loads(page.evaluate(
-                "localStorage.getItem('renovation-equipment-offline-calendar-attendees-v1:' + location.pathname)"
+                "localStorage.getItem('renovation-equipment-offline-management-fee-v1:' + location.pathname)"
             ))
             self.assertEqual(saved["rooms"][3]["ceilingHeightCm"], 240)
         finally:

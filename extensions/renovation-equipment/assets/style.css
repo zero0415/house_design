@@ -1996,6 +1996,28 @@ p { margin: 6px 0 10px; }
 .construction-calendar :focus-visible {
     outline: 3px solid #176d9d; outline-offset: 2px;
 }
+.management-fee {
+    min-width: 0; margin-bottom: 20px; padding: 16px;
+    border: 1px solid #a5bac4; border-radius: 8px;
+    overflow-wrap: anywhere;
+}
+.management-fee p { font-size: 14px; line-height: 1.6; }
+.management-fee-summary { font-weight: 600; }
+.management-fee-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.management-fee button { min-height: 44px; white-space: normal; }
+.management-fee fieldset {
+    min-width: 0; margin: 12px 0; padding: 12px;
+    border: 1px solid #a5bac4;
+}
+.management-fee label { display: block; margin: 8px 0; font-size: 14px; }
+.management-fee input {
+    display: block; box-sizing: border-box; width: 260px; max-width: 100%;
+    min-height: 44px; font-size: 16px;
+}
+.management-fee-error { color: #a12b23; }
+#management-fee-budget { min-width: 0; overflow-wrap: anywhere; }
+#management-fee-budget[hidden] { display: none; }
+#management-fee-note { display: block; font-size: 14px; }
 @media (max-width: 540px) {
     .calendar-editor { grid-template-columns: minmax(0, 1fr); }
     .calendar-navigation button { font-size: 13px; }

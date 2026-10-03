@@ -31,6 +31,7 @@ import { ROBOT_ID } from
 const currentSample = JSON.parse(await readFile(
     new URL("../files/設備規劃.json", import.meta.url), "utf8"));
 const sample = structuredClone(currentSample);
+delete sample.managementCleaningFee;
 sample.items = sample.items.filter((entry) => entry.id !== ROBOT_ID);
 const item = (state, id) => state.items.find((entry) => entry.id === id);
 const product = (state, id) => state.products.find((entry) => entry.id === id);

@@ -32,7 +32,7 @@ import { previewCircuitLinks } from
 
 const file = new URL("../files/設備規劃.json", import.meta.url);
 const raw = await readFile(file, "utf8");
-const publicWithRoles = JSON.parse(raw);
+const { managementCleaningFee: _fee, ...publicWithRoles } = JSON.parse(raw);
 const sample = structuredClone(publicWithRoles);
 sample.constructionCalendar = {
     version: 1, seed: publicWithRoles.constructionCalendar.seed,
@@ -58,8 +58,7 @@ const hash = (text) => createHash("sha256").update(text).digest("hex");
 
 test("original 12-job calendar is exactly one additive field on the published robot edition", () => {
     assert.equal(hash(raw),
-        "413ae7ded2f0731" +
-        "561630e032ec22c966850be87cc357a9c9f01b0f4407db1d6");
+        "a0e9dec5cf9707262f10d2d18daadf3030943ba8e41fcd084ef5c30d13faf3a4");
     assert.equal(hash(JSON.stringify(sample, null, 2) + "\n"),
         "4c03f62e02c0d42ea5305f1310202e7fe4099d3e37e50475aad842f2c68eabc1");
     assert.equal(hash(JSON.stringify(before, null, 2) + "\n"),

@@ -27,7 +27,7 @@ import { calendarFields } from
 
 const path = new URL("../files/設備規劃.json", import.meta.url);
 const raw = await readFile(path, "utf8");
-const publicSample = JSON.parse(raw);
+const { managementCleaningFee: _fee, ...publicSample } = JSON.parse(raw);
 const baseline = validateState(publicSample);
 const item = (state, id) => state.items.find((entry) => entry.id === id);
 const snapshot = (state) => structuredClone({
@@ -214,7 +214,7 @@ test("guarded store rejects old writer or orphan, supports clearing and one comp
     const directory = await mkdtemp(join(tmpdir(), "public-controls-"));
     const file = join(directory, "copy.json");
     try {
-        await writeFile(file, raw);
+        await writeFile(file, JSON.stringify(publicSample));
         const store = createStore(file);
         const latest = await store.read();
         const candidate = structuredClone(latest);

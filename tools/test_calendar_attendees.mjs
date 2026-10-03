@@ -27,7 +27,7 @@ import {
 
 const file = new URL("../files/設備規劃.json", import.meta.url);
 const raw = await readFile(file, "utf8");
-const published = JSON.parse(raw);
+const { managementCleaningFee: _fee, ...published } = JSON.parse(raw);
 const sample = structuredClone(published);
 sample.constructionCalendar.events =
     sample.constructionCalendar.events.filter((event) =>
@@ -61,8 +61,7 @@ const capabilities = {
 
 test("public attendee v2 derives only approved three roles from anonymous v1 calendar", () => {
     assert.equal(sha(raw),
-        "413ae7ded2f0731" +
-        "561630e032ec22c966850be87cc357a9c9f01b0f4407db1d6");
+        "a0e9dec5cf9707262f10d2d18daadf3030943ba8e41fcd084ef5c30d13faf3a4");
     assert.equal(sha(JSON.stringify(sample, null, 2) + "\n"),
         "ba27bcb482e94ead02e291c74df49dd5c9ccb90b744e997139071436e4187c3d");
     assert.equal(sha(JSON.stringify(v1, null, 2) + "\n"),

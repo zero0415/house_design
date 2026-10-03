@@ -60,6 +60,12 @@ def snapshot(state):
     return {key: state[key] for key in ("rooms", "items", "products")}
 
 
+def fee_less(state):
+    previous = deepcopy(state)
+    previous.pop("managementCleaningFee", None)
+    return previous
+
+
 def read(page, mode):
     return page.evaluate(
         "() => globalThis.__RENOVATION_OFFLINE_STORE__.read()"
@@ -300,7 +306,7 @@ with tempfile.TemporaryDirectory(prefix="public-control-relations-") as director
                     page.locator("#save-file").click()
                 download.value.save_as(str(export_path))
                 exported = json.loads(export_path.read_text(encoding="utf-8"))
-                assert exported["formatVersion"] == 10
+                assert exported["formatVersion"] == 11
                 assert snapshot(exported["state"]) == snapshot(second)
                 page.reload()
                 expect(page.locator(".overview-svg")).to_be_visible()
@@ -422,7 +428,7 @@ with tempfile.TemporaryDirectory(prefix="public-control-relations-") as director
                     page.locator("#save-file").click()
                 role_export = json.loads(Path(
                     download.value.path()).read_text(encoding="utf-8"))
-                assert role_export["formatVersion"] == 10
+                assert role_export["formatVersion"] == 11
                 assert role_export["state"]["constructionCalendar"] == (
                     two_roles["constructionCalendar"])
                 page.set_viewport_size({"width": 390, "height": 844})
@@ -452,7 +458,7 @@ with tempfile.TemporaryDirectory(prefix="public-control-relations-") as director
                         "屋主", "廚房工人", "系統櫃工人",
                     ]
 
-                older_calendar = deepcopy(restored_roles)
+                older_calendar = fee_less(restored_roles)
                 older_calendar["constructionCalendar"]["version"] = 1
                 older_calendar["constructionCalendar"]["events"] = [
                     {key: value for key, value in entry.items()
@@ -484,6 +490,8 @@ with tempfile.TemporaryDirectory(prefix="public-control-relations-") as director
                     ]
                 assert snapshot(preserved) == snapshot(restored_roles)
                 assert preserved["undo"] == restored_roles["undo"]
+                assert preserved["managementCleaningFee"] == (
+                    restored_roles["managementCleaningFee"])
                 assert errors == [], errors
                 assert remote == [], remote
                 context.close()
@@ -502,7 +510,7 @@ with tempfile.TemporaryDirectory(prefix="public-control-relations-") as director
             context.close()
 
             context = browser.new_context()
-            previous = deepcopy(normalized_source)
+            previous = fee_less(normalized_source)
             del previous["constructionCalendar"]
             previous["revision"] = 700
             next(entry for entry in previous["items"] if entry["id"] ==
@@ -526,7 +534,8 @@ with tempfile.TemporaryDirectory(prefix="public-control-relations-") as director
                 doors:'renovation-equipment-offline-doors-v1:' + location.pathname,
                 robot:'renovation-equipment-offline-robot-v1:' + location.pathname,
                 calendar:'renovation-equipment-offline-calendar-v1:' + location.pathname,
-                next:'renovation-equipment-offline-calendar-attendees-v1:' + location.pathname,
+                attendees:'renovation-equipment-offline-calendar-attendees-v1:' + location.pathname,
+                next:'renovation-equipment-offline-management-fee-v1:' + location.pathname,
             })""")
             assert page.evaluate(
                 "key => JSON.parse(localStorage.getItem(key))",
@@ -539,10 +548,13 @@ with tempfile.TemporaryDirectory(prefix="public-control-relations-") as director
                 "key => localStorage.getItem(key)", keys["robot"]) is None
             assert page.evaluate(
                 "key => localStorage.getItem(key)", keys["calendar"]) is None
+            assert page.evaluate(
+                "key => localStorage.getItem(key)", keys["attendees"]) is None
             copied = page.evaluate(
                 "key => JSON.parse(localStorage.getItem(key))", keys["next"])
             assert snapshot(copied) == snapshot(previous)
             assert "constructionCalendar" not in read(page, "offline")
+            assert "managementCleaningFee" not in read(page, "offline")
             page.evaluate(
                 "({key,state}) => localStorage.setItem(key,JSON.stringify(state))",
                 {"key": keys["old"], "state": source},
@@ -579,10 +591,10 @@ with tempfile.TemporaryDirectory(prefix="public-control-relations-") as director
             context.close()
 
             context = browser.new_context()
-            old_rollback = deepcopy(normalized_source)
+            old_rollback = fee_less(normalized_source)
             del old_rollback["constructionCalendar"]
             old_rollback["revision"] = 710
-            controls_save = deepcopy(normalized_source)
+            controls_save = fee_less(normalized_source)
             del controls_save["constructionCalendar"]
             controls_save["revision"] = 711
             next(entry for entry in controls_save["items"] if
@@ -608,14 +620,14 @@ with tempfile.TemporaryDirectory(prefix="public-control-relations-") as director
             expect(page.locator("[data-control-light-id]")).to_have_count(1)
             control_key = page.evaluate(
                 "'renovation-equipment-offline-controls-v1:' + location.pathname")
-            attendees_key = page.evaluate(
-                "'renovation-equipment-offline-calendar-attendees-v1:' + location.pathname")
+            fee_key = page.evaluate(
+                "'renovation-equipment-offline-management-fee-v1:' + location.pathname")
             assert page.evaluate(
                 "key => JSON.parse(localStorage.getItem(key))",
                 control_key) == controls_save
             assert snapshot(page.evaluate(
                 "key => JSON.parse(localStorage.getItem(key))",
-                attendees_key)) == snapshot(controls_save)
+                fee_key)) == snapshot(controls_save)
             page.evaluate(
                 "({key,state}) => localStorage.setItem(key,JSON.stringify(state))",
                 {"key": control_key, "state": old_rollback},
@@ -623,12 +635,12 @@ with tempfile.TemporaryDirectory(prefix="public-control-relations-") as director
             page.reload()
             expect(page.locator(".overview-svg")).to_be_visible()
             assert snapshot(read(page, "offline")) == snapshot(controls_save), (
-                "Existing attendee cache must outrank the older controls cache"
+                "Existing fee cache must outrank the older controls cache"
             )
             context.close()
 
             context = browser.new_context(accept_downloads=True)
-            doors_save = deepcopy(normalized_source)
+            doors_save = fee_less(normalized_source)
             del doors_save["constructionCalendar"]
             doors_save["items"] = [entry for entry in doors_save["items"]
                                    if entry["id"] != "living-auto-water-robot"]
@@ -666,7 +678,7 @@ with tempfile.TemporaryDirectory(prefix="public-control-relations-") as director
             copied = page.evaluate(
                 "key => JSON.parse(localStorage.getItem(key))",
                 page.evaluate(
-                    "'renovation-equipment-offline-calendar-attendees-v1:' + location.pathname"))
+                    "'renovation-equipment-offline-management-fee-v1:' + location.pathname"))
             assert snapshot(copied) == snapshot(saved_door_plan)
             with page.expect_download() as download:
                 page.locator("#save-file").click()
@@ -685,7 +697,7 @@ with tempfile.TemporaryDirectory(prefix="public-control-relations-") as director
             context.close()
 
             context = browser.new_context(accept_downloads=True)
-            old_calendar = deepcopy(normalized_source)
+            old_calendar = fee_less(normalized_source)
             old_calendar["revision"] = 715
             old_calendar["constructionCalendar"]["version"] = 1
             old_calendar["constructionCalendar"]["events"] = [
@@ -721,8 +733,8 @@ with tempfile.TemporaryDirectory(prefix="public-control-relations-") as director
             assert saved_calendar["constructionCalendar"]["version"] == 1
             assert all("attendees" not in entry for entry in
                        saved_calendar["constructionCalendar"]["events"])
-            attendee_key = page.evaluate(
-                "'renovation-equipment-offline-calendar-attendees-v1:' + location.pathname")
+            fee_key = page.evaluate(
+                "'renovation-equipment-offline-management-fee-v1:' + location.pathname")
             prior_key = page.evaluate(
                 "'renovation-equipment-offline-calendar-v1:' + location.pathname")
             assert page.evaluate(
@@ -730,7 +742,7 @@ with tempfile.TemporaryDirectory(prefix="public-control-relations-") as director
                 prior_key) == old_calendar
             copied = page.evaluate(
                 "key => JSON.parse(localStorage.getItem(key))",
-                attendee_key)
+                fee_key)
             assert copied["constructionCalendar"]["version"] == 1
             assert snapshot(copied) == snapshot(saved_calendar)
             page.get_by_role("tab", name="開工行事曆", exact=True).click()
@@ -775,14 +787,14 @@ with tempfile.TemporaryDirectory(prefix="public-control-relations-") as director
             assert read(page, "offline")["revision"] == 716
             page.evaluate(
                 "key => localStorage.setItem(key,'{broken')",
-                attendee_key,
+                fee_key,
             )
             page.reload()
             expect(page.locator("#save-status")).to_contain_text(
                 "暫存資料無法驗證")
             assert page.evaluate(
                 "key => localStorage.getItem(key)",
-                attendee_key) == "{broken"
+                fee_key) == "{broken"
             context.close()
             browser.close()
     finally:
@@ -791,4 +803,4 @@ with tempfile.TemporaryDirectory(prefix="public-control-relations-") as director
 
 assert source_path.read_bytes() == raw
 print("PASS: isolated HTTP and offline Edge explicit controls, "
-      "role edits/Undo/JSON9→10, no remote requests, attendee/older cache priority")
+      "role edits/Undo/JSON9→11, no remote requests, fee/older cache priority")
