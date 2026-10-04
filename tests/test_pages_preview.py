@@ -275,6 +275,377 @@ class PagesPreviewTests(unittest.TestCase):
         finally:
             context.close()
 
+    def test_mobile_disclosures_and_floating_top_keep_safety_and_state(self):
+        artifacts = os.environ.get("PUBLIC_MOBILE_ARTIFACTS")
+        if artifacts:
+            Path(artifacts).mkdir(parents=True, exist_ok=True)
+        for width in (320, 390):
+            with self.subTest(width=width):
+                context = self.browser.new_context(
+                    viewport={"width": width, "height": 844},
+                    has_touch=True, reduced_motion="reduce",
+                )
+                try:
+                    page = context.new_page()
+                    requests, errors = [], []
+                    page.on("pageerror", lambda error:
+                            errors.append(str(error)))
+                    page.on("request", lambda request: requests.append(
+                        (request.method, request.url)) if request.url.startswith(
+                            ("http:", "https:")) else None)
+                    self.open_demo(page)
+                    cdp = context.new_cdp_session(page)
+                    cdp.send("Emulation.setDeviceMetricsOverride", {
+                        "width": width, "height": 844,
+                        "deviceScaleFactor": 1, "mobile": True,
+                    })
+                    page.wait_for_function(
+                        "w => innerWidth === w && visualViewport.width === w",
+                        arg=width,
+                    )
+                    initial = page.evaluate(
+                        "globalThis.__RENOVATION_OFFLINE_STORE__.read()")
+                    cache = page.evaluate("JSON.stringify(localStorage)")
+                    page.evaluate("""() => {
+                        window.__mobileViewWrites = [];
+                        const setItem = Storage.prototype.setItem;
+                        Storage.prototype.setItem = function(...args) {
+                            window.__mobileViewWrites.push(args[0]);
+                            return setItem.apply(this, args);
+                        };
+                        const store = globalThis.__RENOVATION_OFFLINE_STORE__;
+                        const update = store.update;
+                        store.update = function(...args) {
+                            window.__mobileViewWrites.push("store.update");
+                            return update.apply(this, args);
+                        };
+                        const scrollTo = window.scrollTo.bind(window);
+                        window.__mobileScrollBehaviors = [];
+                        window.scrollTo = (...args) => {
+                            window.__mobileScrollBehaviors.push(
+                                args[0]?.behavior ?? "legacy");
+                            return scrollTo(...args);
+                        };
+                    }""")
+                    self.assertEqual(page.locator(
+                        "#overall-total").inner_text(), "NT$2,333,060.2")
+                    self.assertEqual(page.locator(
+                        "#management-fee-total").inner_text(), "NT$11,000")
+                    self.assertEqual(page.locator(
+                        "#pending-count").inner_text(), "30")
+                    self.assertIn("跳電風險", page.locator(
+                        "#budget-essentials").inner_text())
+                    self.assertIn("NT$1,959,530", page.locator(
+                        ".quote-baseline").inner_text())
+                    self.assertTrue(page.locator(
+                        ".plan-overview .mobile-overview-alert").is_visible())
+                    self.assertIn("非可施工配置", page.locator(
+                        ".mobile-overview-alert").inner_text())
+                    order = page.locator(".plan-overview > *").evaluate_all(
+                        "nodes => nodes.slice(0, 4).map(node => node.className)")
+                    self.assertEqual(order[:3], [
+                        "plan-display-actions", "mobile-overview-alert",
+                        page.locator(".overview-pan").get_attribute("class"),
+                    ])
+                    self.assertIn("mobile-secondary", order[3])
+                    self.assertTrue(page.locator(
+                        ".ac-warning-group .urgent-cues").is_visible())
+                    self.assertGreater(page.locator(
+                        ".plan-overview [role='alert']").count(), 2)
+                    for selector, contained in (
+                        (".masthead-background", "未收錄原始掃描"),
+                        (".mobile-budget-details", "配電容量"),
+                        (".quote-intro", "1.6 米"),
+                        (".backup-details", "不會修改公開儲存庫"),
+                        (".plan-overview > details.mobile-secondary:first-of-type",
+                         "每格 100cm"),
+                    ):
+                        node = page.locator(selector)
+                        self.assertIsNone(node.get_attribute("open"),
+                                          selector)
+                        self.assertIn(contained, node.text_content())
+                        node.locator("summary").first.click()
+                        self.assertIsNotNone(node.get_attribute("open"))
+                        self.assertIn(contained, node.inner_text())
+                        node.locator("summary").first.click()
+                    self.assertTrue(page.locator(
+                        ".quote-intro").evaluate("""node =>
+                            node.getBoundingClientRect().top >
+                            document.querySelector('#content')
+                                .getBoundingClientRect().top"""))
+                    self.assertLessEqual(page.evaluate(
+                        "document.documentElement.scrollWidth"), width)
+                    page.evaluate("window.scrollTo({top: 1700, behavior: 'instant'})")
+                    page.wait_for_function("scrollY > 1200")
+                    page.wait_for_function("""() => {
+                        const top = document.querySelector("#back-to-top");
+                        return !top.hidden && top.getBoundingClientRect().height >= 48;
+                    }""")
+                    top = page.locator("#back-to-top")
+                    self.assertTrue(top.is_visible())
+                    safe = page.evaluate("""() => {
+                        const control = document.querySelector("#back-to-top");
+                        const box = control.getBoundingClientRect();
+                        const important = [...document.querySelectorAll(
+                            ".toolbar button, .toolbar a, .item-summary " +
+                            ".quick-delete, .delete-confirmation button, " +
+                            ".equipment-foot button, .management-fee-actions button"
+                        )].filter(node => {
+                            const other = node.getBoundingClientRect();
+                            return other.width && other.height && box.left <
+                                other.right && box.right > other.left &&
+                                box.top < other.bottom && box.bottom > other.top;
+                        });
+                        return {left: box.left, right: box.right,
+                            bottom: box.bottom, height: box.height,
+                            overlaps: important.length};
+                    }""")
+                    self.assertEqual(safe["overlaps"], 0)
+                    self.assertLessEqual(safe["right"], width)
+                    self.assertLessEqual(safe["bottom"], 844)
+                    if artifacts:
+                        page.screenshot(path=str(Path(artifacts) /
+                            f"mobile-{width}-disclosures-top-control.png"))
+                    top.focus()
+                    top.press("Enter")
+                    page.wait_for_function("scrollY <= 2")
+                    self.assertEqual(page.evaluate(
+                        "document.activeElement?.id"), "planner-title")
+                    self.assertEqual(page.evaluate(
+                        "window.__mobileScrollBehaviors.at(-1)"), "instant")
+                    page.get_by_role(
+                        "tab", name="開工行事曆", exact=True).click()
+                    fee_help = page.locator(
+                        ".management-fee > details.mobile-secondary")
+                    self.assertIsNone(fee_help.get_attribute("open"))
+                    self.assertIn("物件清單 CSV 不含此獨立費用",
+                                  fee_help.text_content())
+                    fee_help.locator("summary").click()
+                    self.assertIn("物件清單 CSV 不含此獨立費用",
+                                  fee_help.inner_text())
+                    fee_help.locator("summary").click()
+                    page.evaluate("""window.scrollTo({
+                        top: document.documentElement.scrollHeight,
+                        behavior: "instant",
+                    })""")
+                    page.wait_for_function("""() =>
+                        scrollY + innerHeight >=
+                            document.documentElement.scrollHeight - 2""")
+                    bottom = page.evaluate("""() => {
+                        const last = document.querySelector(
+                            ".layout > .backup-details > summary"
+                        ).getBoundingClientRect();
+                        const floating = document.querySelector(
+                            "#back-to-top");
+                        const button = floating.hidden ? null :
+                            floating.getBoundingClientRect();
+                        return {lastTop: last.top, lastBottom: last.bottom,
+                            floatingTop: button?.top ?? null,
+                            overlap: button !== null &&
+                                last.left < button.right &&
+                                last.right > button.left &&
+                                last.top < button.bottom &&
+                                last.bottom > button.top};
+                    }""")
+                    self.assertGreaterEqual(bottom["lastTop"], 0, bottom)
+                    self.assertLessEqual(bottom["lastBottom"], 844, bottom)
+                    self.assertFalse(bottom["overlap"], bottom)
+                    if bottom["floatingTop"] is not None:
+                        self.assertLessEqual(
+                            bottom["lastBottom"],
+                            bottom["floatingTop"] - 4, bottom)
+                    for selector in (
+                        ".calendar-agenda li:last-child button",
+                        ".management-fee-actions [data-fee-undo]",
+                    ):
+                        target = page.locator(selector).first
+                        target.evaluate("""node => node.scrollIntoView({
+                            block: "end", behavior: "instant"
+                        })""")
+                        readable = target.evaluate("""node => {
+                            const item = node.getBoundingClientRect();
+                            const top = document.querySelector(
+                                "#back-to-top");
+                            const floating = top.hidden ? null :
+                                top.getBoundingClientRect();
+                            return {itemBottom: item.bottom,
+                                floatingTop: floating?.top ?? null,
+                                overlap: floating !== null &&
+                                    item.left < floating.right &&
+                                    item.right > floating.left &&
+                                    item.top < floating.bottom &&
+                                    item.bottom > floating.top};
+                        }""")
+                        self.assertFalse(readable["overlap"],
+                                         (selector, readable))
+                        self.assertLessEqual(
+                            readable["itemBottom"], 844,
+                            (selector, readable))
+                    if artifacts:
+                        page.evaluate("""window.scrollTo({
+                            top: document.documentElement.scrollHeight,
+                            behavior: "instant",
+                        })""")
+                        page.screenshot(path=str(Path(artifacts) /
+                            f"mobile-{width}-page-end-clear.png"))
+                    page.get_by_role(
+                        "tab", name="依房間", exact=True).click()
+                    for selector in (
+                        "#save-file", "#undo-last",
+                        ".room .item-summary .quick-delete",
+                    ):
+                        target = page.locator(selector).first
+                        target.evaluate("""node => node.scrollIntoView({
+                            block: "end", behavior: "instant"
+                        })""")
+                        collision = target.evaluate("""node => {
+                            const item = node.getBoundingClientRect();
+                            const top = document.querySelector(
+                                "#back-to-top");
+                            const floating = top.hidden ? null :
+                                top.getBoundingClientRect();
+                            return floating !== null &&
+                                item.left < floating.right &&
+                                item.right > floating.left &&
+                                item.top < floating.bottom &&
+                                item.bottom > floating.top;
+                        }""")
+                        self.assertFalse(collision, selector)
+                    self.assertEqual(page.evaluate(
+                        "globalThis.__RENOVATION_OFFLINE_STORE__.read()"),
+                        initial)
+                    self.assertEqual(page.evaluate(
+                        "JSON.stringify(localStorage)"), cache)
+                    self.assertEqual(page.evaluate(
+                        "window.__mobileViewWrites"), [])
+                    self.assertTrue(all(
+                        method == "GET" and url.startswith(self.base)
+                        for method, url in requests), requests)
+                    self.assertEqual(errors, [])
+                finally:
+                    context.close()
+
+    def test_mobile_room_diagram_drag_and_equipment_undo_keep_other_states(self):
+        for width in (320, 390):
+            with self.subTest(width=width):
+                context = self.browser.new_context(
+                    viewport={"width": width, "height": 844},
+                    has_touch=True,
+                )
+                try:
+                    page = context.new_page()
+                    requests, errors = [], []
+                    page.on("request", lambda request: requests.append(
+                        (request.method, request.url)) if request.url.startswith(
+                            ("http:", "https:")) else None)
+                    page.on("pageerror", lambda error:
+                            errors.append(str(error)))
+                    self.open_demo(page)
+                    cdp = context.new_cdp_session(page)
+                    cdp.send("Emulation.setDeviceMetricsOverride", {
+                        "width": width, "height": 844,
+                        "deviceScaleFactor": 1, "mobile": True,
+                    })
+                    page.wait_for_function(
+                        "w => innerWidth === w && visualViewport.width === w",
+                        arg=width,
+                    )
+                    before = page.evaluate(
+                        "globalThis.__RENOVATION_OFFLINE_STORE__.read()")
+                    item_id = "living-refrigerator"
+                    position = next(item["placement"] for item in
+                                    before["items"] if item["id"] == item_id)
+                    page.locator(
+                        '.overview-svg .plan-zone[data-select-room="living-dining"]'
+                    ).click()
+                    palette_help = page.locator(
+                        ".furniture-palette > details.mobile-secondary")
+                    self.assertIsNone(palette_help.get_attribute("open"))
+                    self.assertIn("觸控可先點名稱再點房內",
+                                  palette_help.text_content())
+                    palette_help.locator("summary").click()
+                    self.assertIn("觸控可先點名稱再點房內",
+                                  palette_help.inner_text())
+                    palette_help.locator("summary").click()
+                    room_order = page.locator(
+                        ".plan-detail > *").evaluate_all(
+                        "nodes => nodes.slice(0, 4).map(node => node.tagName + ':' + node.className)")
+                    self.assertTrue(
+                        room_order[0].startswith(
+                            "DIV:plan-detail-header"), room_order)
+                    self.assertTrue(room_order[1].startswith(
+                        "H2:"), room_order)
+                    self.assertIn("mobile-room-alert", room_order[2])
+                    self.assertIn("room-plan-scroll", room_order[3])
+                    diagram = page.locator(".room-plan-scroll")
+                    self.assertGreater(diagram.evaluate(
+                        "node => node.scrollWidth - node.clientWidth"), 250)
+                    self.assertGreaterEqual(diagram.locator(
+                        ".room-svg").evaluate(
+                            "node => node.getBoundingClientRect().width"), 720)
+                    marker = diagram.locator(
+                        f'[data-marker-id="{item_id}"]')
+                    marker.scroll_into_view_if_needed()
+                    box = marker.bounding_box()
+                    x = box["x"] + box["width"] / 2
+                    y = box["y"] + box["height"] / 2
+                    page.mouse.move(x, y)
+                    page.mouse.down()
+                    page.mouse.move(x + 30, y + 15, steps=6)
+                    page.mouse.up()
+                    page.wait_for_function("""({id, old}) => {
+                        const saved = localStorage.getItem(
+                            'renovation-equipment-offline-management-fee-v1:' +
+                                location.pathname);
+                        if (!saved) return false;
+                        const state = JSON.parse(saved);
+                        const current = state.items.find(entry => entry.id === id);
+                        return state.revision === 1 &&
+                            state.undo?.items?.length === 182 &&
+                            (Math.abs(current.placement.x - old.x) > .001 ||
+                             Math.abs(current.placement.y - old.y) > .001);
+                    }""", arg={"id": item_id, "old": position},
+                    timeout=15000)
+                    changed = page.evaluate(
+                        "globalThis.__RENOVATION_OFFLINE_STORE__.read()")
+                    self.assertEqual(changed["undo"], {
+                        key: before[key]
+                        for key in ("rooms", "items", "products")
+                    })
+                    self.assertEqual(changed["constructionCalendar"],
+                                     before["constructionCalendar"])
+                    self.assertEqual(changed["managementCleaningFee"],
+                                     before["managementCleaningFee"])
+                    self.assertEqual(page.locator(
+                        "#overall-total").inner_text(), "NT$2,333,060.2")
+                    page.locator("#undo-last").click()
+                    page.wait_for_function("""({id, old}) => {
+                        const saved = localStorage.getItem(
+                            'renovation-equipment-offline-management-fee-v1:' +
+                                location.pathname);
+                        if (!saved) return false;
+                        const state = JSON.parse(saved);
+                        const current = state.items.find(entry => entry.id === id);
+                        return state.revision === 2 &&
+                            state.undo === null &&
+                            Math.abs(current.placement.x - old.x) < .000001 &&
+                            Math.abs(current.placement.y - old.y) < .000001;
+                    }""", arg={"id": item_id, "old": position},
+                    timeout=15000)
+                    restored = page.evaluate(
+                        "globalThis.__RENOVATION_OFFLINE_STORE__.read()")
+                    for key in ("rooms", "items", "products", "undo",
+                                "constructionCalendar", "managementCleaningFee"):
+                        self.assertEqual(restored[key], before[key])
+                    self.assertEqual(page.evaluate(
+                        "document.documentElement.scrollWidth"), width)
+                    self.assertTrue(all(
+                        method == "GET" and url.startswith(self.base)
+                        for method, url in requests), requests)
+                    self.assertEqual(errors, [])
+                finally:
+                    context.close()
+
     def test_public_management_fee_is_editable_independent_and_mobile_readable(self):
         context = self.browser.new_context(
             viewport={"width": 1280, "height": 960},
@@ -1360,7 +1731,12 @@ class PagesPreviewTests(unittest.TestCase):
             self.assertLessEqual(balcony_scroll, page.evaluate(
                 "document.documentElement.scrollWidth"))
             page.locator('.overview-svg .plan-zone[data-select-room="balcony"]').click()
-            self.assertEqual(page.locator(".budget").inner_text(), budget)
+            self.assertEqual(page.locator("#overall-total").inner_text(),
+                             "NT$2,333,060.2")
+            self.assertEqual(page.locator("#management-fee-total").inner_text(),
+                             "NT$11,000")
+            self.assertIn("配電容量", page.locator(
+                "#overall-note").text_content())
             page.locator("[data-plan-room-select]").select_option("ac-platform")
             self.assertEqual(page.locator(
                 'svg[data-room-canvas="ac-platform"] '
@@ -1661,7 +2037,12 @@ class PagesPreviewTests(unittest.TestCase):
             self.assertEqual(outlet.get_attribute("aria-selected"), "true")
             self.assertEqual(page.evaluate(
                 "globalThis.__RENOVATION_OFFLINE_STORE__.read()"), before)
-            self.assertEqual(page.locator(".budget").inner_text(), budget)
+            self.assertEqual(page.locator("#overall-total").inner_text(),
+                             "NT$2,333,060.2")
+            self.assertEqual(page.locator("#management-fee-total").inner_text(),
+                             "NT$11,000")
+            self.assertIn("配電容量", page.locator(
+                "#overall-note").text_content())
             self.assertIsNone(page.evaluate(
                 "localStorage.getItem('renovation-equipment-offline-v1:' + location.pathname)"
             ))

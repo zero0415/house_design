@@ -110,9 +110,20 @@ const undoButton = document.querySelector("#undo-last");
 const toolbar = document.querySelector(".toolbar");
 const currency = new Intl.NumberFormat("zh-TW", { maximumFractionDigits: 2 });
 const currencySymbols = { TWD: "NT$", JPY: "¥", USD: "US$" };
+const mobileViewport = window.matchMedia("(max-width: 600px)");
+const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+const previousTabButton = document.querySelector("#previous-tab");
+const backToTopButton = document.querySelector("#back-to-top");
+const mobileBudgetDetails = document.querySelector(".mobile-budget-details");
+const overallNote = document.querySelector("#overall-note");
+const feeNote = document.querySelector("#management-fee-note");
+const overallNoteHome = overallNote.parentElement;
+const feeNoteHome = feeNote.parentElement;
+const tabHistory = [];
 
 let state;
 let view = "plan";
+let overviewReadingMode = false;
 const calendarUi = calendarUI();
 const feeUi = managementFeeUI();
 let controlSwitchId = null;
@@ -224,6 +235,185 @@ function setStatus(message, kind = "info") {
     status.textContent = message;
     status.dataset.kind = kind;
 }
+
+function selectView(next) {
+    if (view === next) return;
+    if (!document.querySelector(`.tabs [data-view="${next}"]`)) {
+        throw new RangeError(`找不到分頁：${next}`);
+    }
+    tabHistory.push(view);
+    view = next;
+}
+
+function returnToVisitedTab() {
+    if (invalidInputs.size || saving || undoing ||
+        calendarUi.busy || feeUi.busy) {
+        setStatus("請先修正無效欄位或等待儲存結束，再返回上一個分頁。",
+            "error");
+        return;
+    }
+    const previous = tabHistory.pop();
+    if (!previous) return;
+    view = previous;
+    pendingDeleteId = null;
+    pendingMoveOutletId = null;
+    if (view !== "plan") pendingObject = null;
+    render();
+    const tab = document.querySelector(`.tabs [data-view="${view}"]`);
+    tab?.focus({ preventScroll: true });
+    if (mobileViewport.matches) {
+        document.querySelector(".tabs").scrollIntoView({
+            block: "start", behavior: "instant",
+        });
+    }
+}
+
+function wrapSecondary(selector, summary, grouped = false) {
+    const nodes = [...content.querySelectorAll(selector)];
+    if (!nodes.length) return;
+    const sets = grouped ? [nodes] : nodes.map((node) => [node]);
+    for (const group of sets) {
+        const details = document.createElement("details");
+        details.className = "mobile-secondary";
+        details.dataset.mobileSecondary = "";
+        details.open = !mobileViewport.matches;
+        const heading = document.createElement("summary");
+        heading.textContent = summary;
+        group[0].before(details);
+        details.append(heading, ...group);
+    }
+}
+
+function wrapSecondaryCopy() {
+    if (view === "plan") {
+        wrapSecondary(".plan-overview > p.plan-disclaimer:first-child",
+            "格局僅供討論，施工須現場丈量（比例與操作說明）");
+        wrapSecondary(".plan-overview > p.door-legend",
+            "格局標記、門窗與報價圖例（展開）");
+        const roomIntro = content.querySelector(
+            ".plan-detail > p.plan-disclaimer");
+        if (roomIntro) {
+            const details = document.createElement("details");
+            details.className = "mobile-secondary";
+            details.dataset.mobileSecondary = "";
+            details.open = !mobileViewport.matches;
+            const summary = document.createElement("summary");
+            summary.textContent = "房間示意非施工圖（比例與操作說明）";
+            roomIntro.before(details);
+            details.append(summary, roomIntro);
+        }
+        wrapSecondary(".plan-detail .furniture-palette > p.muted",
+            "物件拖曳、轉向與標位操作（展開）");
+    } else if (view === "survey") {
+        wrapSecondary(".survey-view > p.plan-disclaimer",
+            "門窗尺寸僅供示意，施工須實測（展開）");
+        wrapSecondary(".survey-view > p.survey-note",
+            "圖面來源、比例與使用限制（展開）", true);
+    } else if (view === "outlet-sheet" || view === "lighting-sheet") {
+        wrapSecondary(".electrical-sheet > p.muted",
+            "示意圖非施工配線（捲動與圖例說明）");
+    } else if (view === "database") {
+        wrapSecondary(".database-head .muted",
+            "資料庫商品不直接計入總額（使用說明）");
+    } else if (view === "device") {
+        wrapSecondary("#content > p.muted",
+            "未標位明細請至依房間查看（清單說明）");
+    } else if (view === "calendar") {
+        wrapSecondary(".construction-calendar > p:first-of-type",
+            "工期僅暫排，非承包商承諾（編輯說明）");
+        wrapSecondary(".management-fee > p:last-of-type",
+            "清潔費備份與獨立復原說明（展開）");
+    }
+}
+
+function orderMobilePlan() {
+    if (view !== "plan" || !mobileViewport.matches) return;
+    const overview = content.querySelector(".plan-overview");
+    if (overview) {
+        const actions = overview.querySelector(
+            ":scope > .plan-display-actions");
+        const caution = overview.querySelector(
+            ":scope > .mobile-overview-alert");
+        const diagram = overview.querySelector(
+            ":scope > .overview-pan");
+        const explanation = overview.querySelector(
+            ":scope > .mobile-secondary");
+        if (![actions, caution, diagram, explanation].every(Boolean)) {
+            throw new Error("手機全屋格局缺少閱讀控制或警示。");
+        }
+        overview.prepend(actions, caution, diagram, explanation);
+    }
+    const detail = content.querySelector(".plan-detail");
+    if (detail) {
+        const header = detail.querySelector(
+            ":scope > .plan-detail-header");
+        const title = detail.querySelector(":scope > h2");
+        const caution = detail.querySelector(
+            ":scope > .mobile-room-alert");
+        const diagram = detail.querySelector(
+            ":scope > .room-plan-scroll, :scope > .platform-scroll");
+        if (![header, title, caution, diagram].every(Boolean)) {
+            throw new Error("手機房間圖缺少閱讀區塊或警示。");
+        }
+        header.after(title, caution, diagram);
+    }
+}
+
+function centerOverviewReadingRoom(viewport) {
+    let readingLabel;
+    let largestRoomArea = 0;
+    for (const zone of viewport.querySelectorAll(".plan-zone")) {
+        const label = zone.querySelector(".plan-zone-label");
+        const floor = zone.querySelector(".zone-floor");
+        if (!label || !floor) continue;
+        const bounds = floor.getBBox();
+        const area = bounds.width * bounds.height;
+        if (area > largestRoomArea) {
+            largestRoomArea = area;
+            readingLabel = label;
+        }
+    }
+    if (!readingLabel) return false;
+    viewport.scrollLeft = 0;
+    viewport.scrollTop = 0;
+    const viewportBounds = viewport.getBoundingClientRect();
+    const labelBounds = readingLabel.getBoundingClientRect();
+    viewport.scrollLeft = Math.max(0, Math.min(
+        viewport.scrollWidth - viewport.clientWidth,
+        labelBounds.left + labelBounds.width / 2 -
+        viewportBounds.left - viewport.clientLeft -
+        viewport.clientWidth / 2));
+    viewport.scrollTop = Math.max(0, Math.min(
+        viewport.scrollHeight - viewport.clientHeight,
+        labelBounds.top + labelBounds.height / 2 -
+        viewportBounds.top - viewport.clientTop -
+        viewport.clientHeight / 2));
+    return true;
+}
+
+function syncMobileDisclosures() {
+    if (mobileViewport.matches) {
+        mobileBudgetDetails.append(overallNote, feeNote);
+    } else {
+        overallNoteHome.append(overallNote);
+        feeNoteHome.append(feeNote);
+    }
+    for (const details of document.querySelectorAll(
+        "[data-mobile-secondary]")) {
+        details.open = !mobileViewport.matches;
+    }
+}
+
+syncMobileDisclosures();
+mobileViewport.addEventListener("change", () => {
+    syncMobileDisclosures();
+    if (state && !dirty && !saving && !undoing && !invalidInputs.size &&
+        !pendingNewItem && !pendingProduct &&
+        !calendarUi.draft && !feeUi.draft &&
+        !document.activeElement?.matches(
+            "input, select, textarea, [contenteditable]")) render();
+    updateBackToTop();
+});
 
 function stateSnapshot(source = state) {
     return structuredClone({
@@ -408,6 +598,9 @@ function renderTotals() {
     document.querySelector("#management-fee-budget").hidden = !fee.fee;
     document.querySelector("#management-fee-total").textContent =
         `NT$${currency.format(fee.totalTWD)}`;
+    document.querySelector("#management-fee-short").textContent = fee.fee
+        ? `${fee.days}日（含${fee.sundays}週日）` : "";
+    feeNote.hidden = !fee.fee;
     document.querySelector("#management-fee-note").textContent =
         managementFeeDescription(state.managementCleaningFee);
     const socketCount = state.items.filter(isSocket).length;
@@ -419,6 +612,13 @@ function renderTotals() {
         .join(" · ");
     document.querySelector("#quote-baseline").textContent = `NT$${currency.format(ORIGINAL_QUOTE_TWD)}`;
     document.querySelector("#overall-total").textContent = `NT$${currency.format(overall.TWD)}`;
+    document.querySelector("#budget-essentials").textContent = [
+        totals.pendingCount ? `${totals.pendingCount} 項價待補` : null,
+        socketCount !== QUOTED_SOCKET_COUNT ||
+            circuitCount !== QUOTED_DEDICATED_COUNT
+            ? "插座／迴路未核（跳電風險）" : null,
+        "監工與稅另計",
+    ].filter(Boolean).join(" · ");
     document.querySelector("#overall-note").textContent = [
         points.weak || state.items.some((item) => item.outletPlanPointId)
             ? `實體電源 ${points.power}（一般 ${points.general}＋已配專用 ${points.dedicated}），` +
@@ -1831,7 +2031,7 @@ function openProductForm(id = null) {
     }
     pendingProduct = productDraft(product);
     pendingProductDeleteId = null;
-    view = "database";
+    selectView("database");
     render();
     content.querySelector(product ? '[data-product-field="name"]' :
         "[data-product-type]")?.focus();
@@ -1930,7 +2130,7 @@ function selectPlanRoom(roomId, itemId = null) {
     selectedPlanItemId = itemId && items.some((item) => item.id === itemId)
         ? itemId
         : items.find((item) => item.name.includes("馬桶"))?.id ?? items[0]?.id ?? null;
-    view = "plan";
+    selectView("plan");
     render();
     content.querySelector(".plan-detail")?.scrollIntoView({ block: "start" });
 }
@@ -2446,6 +2646,16 @@ function renderPlanView() {
         const outside = state.rooms.filter((entry) => !knownRoomIds.has(entry.id))
             .map((entry) => `<button type="button" data-action="select-plan-room"
                 data-room-id="${escapeHtml(entry.id)}">${escapeHtml(entry.name)}</button>`).join("");
+        const mobileWarnings = [
+            pointWarnings.length ? `${pointWarnings.length}處電源` : null,
+            conflicts.length ? `${conflicts.length}件牆柱衝突` : null,
+            state.items.some(isActiveSplitAirConditioner)
+                ? "冷氣機位" : null,
+            floorDryer || platformDryer ? "烘衣機供能／排氣" : null,
+            platformSink ? "洗衣盆承重" : null,
+            state.items.some((item) => item.id === "bath-guest-vanity")
+                ? "客浴淨距" : null,
+        ].filter(Boolean);
         return `<section class="plan-overview">
             <p class="plan-disclaimer">依原圖標註的 1:60 比例與牆內緣
                 <strong>等比例</strong>描繪；每格 100cm
@@ -2454,7 +2664,24 @@ function renderPlanView() {
                 已確認的新拉門沿新圖標示，不能代替現場丈量。
                 可拖動的設備、家具、開關及燈具均可在房間圖選取後點右上角 ↻
                 轉向；室外機也有自己的 ↻。門窗、牆線與固定水槽不屬可旋轉物件。</p>
-            <div class="plan-display-actions">${visibleControls}${lightingControls}${sourceToggle}</div>
+            <div class="plan-display-actions">
+                <button type="button" class="overview-reading-toggle"
+                    data-action="toggle-overview-reading"
+                    aria-controls="overview-pan"
+                    aria-pressed="${overviewReadingMode}">${overviewReadingMode
+                        ? "縮回全圖" : "放大閱讀"}</button>
+                ${lightingControls}
+                <details class="mobile-secondary plan-layer-settings"
+                    data-mobile-secondary ${mobileViewport.matches ? "" : "open"}>
+                    <summary>顯示圖層與幾何底圖（展開）</summary>
+                    ${visibleControls}${sourceToggle}
+                </details>
+            </div>
+            <p class="mobile-overview-alert" role="note">
+                <strong>非可施工配置：</strong>
+                ${escapeHtml(mobileWarnings.join("、") ||
+                    "尺寸、開門與安裝條件")}待核；
+                圖後詳列施工警示。</p>
             ${renderACPlanningWarnings(state.items)}
             ${renderLaundryWarnings(state.items)}
             ${renderRobotCaution(state.items)}
@@ -2471,9 +2698,16 @@ function renderPlanView() {
             ${outdoorConflicts.length ? `<p class="plan-overlap-alert" role="alert">
                 ${outdoorConflicts.map((item) => escapeHtml(roomName(item.roomId))).join("、")}
                 的室外機占地超出圖示外側輪廓，須核對機型、支架與位置。</p>` : ""}
-            ${renderOverviewPlan(state.rooms, state.items, showSourceOverlay,
-                lightingPreview ? litItemIds : null, visiblePlanLayers,
-                focusedCircuitId, lightingPlaneCm)}
+            <div id="overview-pan" class="overview-pan
+                ${overviewReadingMode ? "is-reading" : ""}"
+                tabindex="0" role="region"
+                aria-label="${overviewReadingMode
+                    ? "放大閱讀全屋格局；可上下左右捲動"
+                    : "完整全屋格局；按放大閱讀可看清文字"}">
+                ${renderOverviewPlan(state.rooms, state.items, showSourceOverlay,
+                    lightingPreview ? litItemIds : null, visiblePlanLayers,
+                    focusedCircuitId, lightingPlaneCm)}
+            </div>
             ${socketLegend}
             ${socketAlerts}
             ${socketPlanDetails}
@@ -2713,6 +2947,18 @@ function renderPlanView() {
             aria-pressed="${pendingObject?.kind === "template" && pendingObject.type === type}">
             ${escapeHtml(template.name)}</button>`
     ).join("");
+    const roomCautions = [
+        conflicts.some((item) => item.roomId === room.id)
+            ? "圖上占地與牆柱衝突" : null,
+        pointWarnings.length ? "電源來源標位待核" : null,
+        splitAC ? "冷氣室外機與配線待核" : null,
+        (room.id === "balcony" || platform) &&
+            (floorDryer || platformDryer)
+            ? "烘衣機供能及排氣待核" : null,
+        room.id === "bath-guest" ? "浴缸與浴櫃淨距待量" : null,
+        (room.id === "balcony" || platform) && platformSink
+            ? "外推洗衣盆承重與排水待核" : null,
+    ].filter(Boolean);
 
     return `<section class="plan-detail">
         <div class="plan-detail-header">
@@ -2728,6 +2974,10 @@ function renderPlanView() {
             ${sourceToggle}
         </div>
         <h2>${escapeHtml(room.name)}</h2>
+        <p class="mobile-room-alert" role="note">
+            <strong>非施工圖：</strong>
+            ${escapeHtml(roomCautions.join("、") || "門窗、安裝與淨距")}；
+            圖後警示及編輯欄位仍須逐項核對。</p>
         ${renderACPlanningWarnings(items)}
         ${renderLaundryWarnings(room.id === "balcony"
             ? [...items, ...[platformDryer, platformSink].filter(Boolean)] : items)}
@@ -2952,14 +3202,19 @@ function renderPlanView() {
                 ? `<button type="button" data-action="finish-rotation">
                     完成轉向（可拖曳）</button>` : ""}
         </div>
-        ${platform ? `<div class="platform-scroll">
+        ${platform ? `<div class="platform-scroll" tabindex="0" role="region"
+            aria-label="${escapeHtml(room.name)}圖面，可在圖內上下左右捲動">
             ${renderRoomPlan(room, items, selectedPlanItemId, state.items, showSourceOverlay,
                 lightingPreview ? litItemIds : null, visiblePlanLayers, focusedCircuitId,
                 !rotateHandleHidden, lightingPlaneCm)}
         </div><p class="plan-disclaimer">長形鐵窗圖可水平捲動；縮放時仍保持原圖縱橫比例。</p>`
-            : renderRoomPlan(room, items, selectedPlanItemId, state.items, showSourceOverlay,
-                lightingPreview ? litItemIds : null, visiblePlanLayers, focusedCircuitId,
-                !rotateHandleHidden, lightingPlaneCm)}
+            : `<div class="room-plan-scroll" tabindex="0" role="region"
+                aria-label="${escapeHtml(room.name)}放大圖，可在圖內上下左右捲動">
+                ${renderRoomPlan(room, items, selectedPlanItemId, state.items,
+                    showSourceOverlay, lightingPreview ? litItemIds : null,
+                    visiblePlanLayers, focusedCircuitId,
+                    !rotateHandleHidden, lightingPlaneCm)}
+            </div>`}
         ${lightingLegend}
         ${renderLightingAssessment(room)}
         ${room.id === "kitchen" ? `<p class="plan-overlap-alert">${KITCHEN_SAFETY}</p>
@@ -3033,6 +3288,12 @@ function render() {
             button.setAttribute("aria-selected", String(button.dataset.view === view));
             button.tabIndex = button.dataset.view === view ? 0 : -1;
         }
+        previousTabButton.disabled = tabHistory.length === 0;
+        const previousName = tabHistory.at(-1);
+        previousTabButton.title = previousName
+            ? `返回${document.querySelector(
+                `.tabs [data-view="${previousName}"]`)?.textContent ?? "上一個"}分頁`
+            : "尚無先前瀏覽的分頁";
         const sheetView = view === "outlet-sheet" || view === "lighting-sheet";
         content.setAttribute("aria-labelledby", `view-${view}`);
         document.querySelector("#add-item").hidden =
@@ -3053,6 +3314,19 @@ function render() {
             : view === "plan" ? renderPlanView()
                 : view === "room" ? renderRoomView()
                     : view === "database" ? renderDatabaseView() : renderDeviceView());
+        wrapSecondaryCopy();
+        orderMobilePlan();
+        const readingViewport = content.querySelector(".overview-pan.is-reading");
+        if (readingViewport && !centerOverviewReadingRoom(readingViewport)) {
+            overviewReadingMode = false;
+            readingViewport.classList.remove("is-reading");
+            readingViewport.setAttribute("aria-label",
+                "完整全屋格局；按放大閱讀可看清文字");
+            const toggle = content.querySelector(".overview-reading-toggle");
+            toggle.setAttribute("aria-pressed", "false");
+            toggle.textContent = "放大閱讀";
+            setStatus("全屋格局缺少可閱讀的房間標籤，請重新載入規劃。", "error");
+        }
         if (view === "calendar") {
             bindCalendar(content.querySelector(".construction-calendar"),
                 state.constructionCalendar, calendarUi, {
@@ -3064,6 +3338,7 @@ function render() {
                 });
         }
         renderTotals();
+        updateBackToTop();
     } finally {
         rendering = false;
         if (rerenderQueued) {
@@ -3075,9 +3350,25 @@ function render() {
 
 function renderPlanChange() {
     const top = window.scrollY;
-    const platformLeft = content.querySelector(".platform-scroll")?.scrollLeft;
+    const roomScroll = content.querySelector(
+        ".room-plan-scroll, .platform-scroll");
+    const roomLeft = roomScroll?.scrollLeft;
+    const roomTop = roomScroll?.scrollTop;
+    const overview = content.querySelector(".overview-pan");
+    const overviewLeft = overview?.scrollLeft;
+    const overviewTop = overview?.scrollTop;
     render();
-    if (platformLeft != null) content.querySelector(".platform-scroll").scrollLeft = platformLeft;
+    if (roomLeft != null) {
+        const next = content.querySelector(
+            ".room-plan-scroll, .platform-scroll");
+        next.scrollLeft = roomLeft;
+        next.scrollTop = roomTop;
+    }
+    if (overviewLeft != null) {
+        const next = content.querySelector(".overview-pan");
+        next.scrollLeft = overviewLeft;
+        next.scrollTop = overviewTop;
+    }
     window.scrollTo(0, top);
 }
 
@@ -4705,6 +4996,34 @@ content.addEventListener("click", (event) => {
     if (!state) return;
     if (button) {
         const { action, roomId, itemId } = button.dataset;
+        if (action === "toggle-overview-reading") {
+            const viewport = content.querySelector(".overview-pan");
+            if (!viewport) {
+                setStatus("找不到全屋格局，請重新載入。", "error");
+                return;
+            }
+            if (!overviewReadingMode) {
+                viewport.classList.add("is-reading");
+                if (!centerOverviewReadingRoom(viewport)) {
+                    viewport.classList.remove("is-reading");
+                    setStatus("全屋格局缺少可閱讀的房間標籤，請重新載入規劃。", "error");
+                    return;
+                }
+                overviewReadingMode = true;
+            } else {
+                overviewReadingMode = false;
+                viewport.classList.remove("is-reading");
+                viewport.scrollLeft = 0;
+                viewport.scrollTop = 0;
+            }
+            viewport.setAttribute("aria-label", overviewReadingMode
+                ? "放大閱讀全屋格局；可上下左右捲動"
+                : "完整全屋格局；按放大閱讀可看清文字");
+            button.setAttribute("aria-pressed", String(overviewReadingMode));
+            button.textContent = overviewReadingMode ? "縮回全圖" : "放大閱讀";
+            button.focus({ preventScroll: true });
+            return;
+        }
         if (action === "toggle-plan-layer") {
             const layer = button.dataset.layer;
             if (!Object.hasOwn(visiblePlanLayers, layer)) {
@@ -4765,7 +5084,7 @@ content.addEventListener("click", (event) => {
             return;
         }
         if (action === "go-product-database") {
-            view = "database";
+            selectView("database");
             render();
             setStatus("先在物件資料庫新增款式；完成後可返回正在新增的設備。");
             return;
@@ -4775,7 +5094,7 @@ content.addEventListener("click", (event) => {
                 setStatus("目前沒有正在新增的設備。", "error");
                 return;
             }
-            view = newItemOriginView ?? "room";
+            selectView(newItemOriginView ?? "room");
             render();
             content.querySelector("[data-add-template]")?.focus();
             return;
@@ -4866,6 +5185,7 @@ content.addEventListener("click", (event) => {
         if (action === "select-plan-room") selectPlanRoom(roomId);
         if (action === "all-rooms") {
             planRoomId = null;
+            overviewReadingMode = false;
             selectedPlanItemId = null;
             rotateHandleHidden = false;
             pendingDeleteId = null;
@@ -5633,7 +5953,9 @@ async function loadSave(file) {
         lightingPreview = false;
         litItemIds = new Set();
         focusedCircuitId = null;
+        tabHistory.length = 0;
         view = "plan";
+        overviewReadingMode = false;
         reloadButton.hidden = true;
         render();
         setStatus(updated.storageWarning ||
@@ -5710,13 +6032,130 @@ for (const button of document.querySelectorAll("[data-view]")) {
             setStatus("請先修正無效數字，再切換檢視方式。", "error");
             return;
         }
-        view = button.dataset.view;
+        selectView(button.dataset.view);
         pendingDeleteId = null;
         pendingMoveOutletId = null;
         if (view !== "plan") pendingObject = null;
         render();
     });
 }
+
+previousTabButton.addEventListener("click", returnToVisitedTab);
+
+function overlapping(first, second) {
+    return first.left < second.right && first.right > second.left &&
+        first.top < second.bottom && first.bottom > second.top;
+}
+
+function updateBackToTop() {
+    if (!mobileViewport.matches || window.scrollY < 320 ||
+        document.activeElement?.matches(
+            "input, textarea, select, [contenteditable]")) {
+        backToTopButton.hidden = true;
+        return;
+    }
+    backToTopButton.hidden = false;
+    const controls = [...document.querySelectorAll(
+        ".toolbar button, .toolbar a, .delete-confirmation button, " +
+        ".item-summary .quick-delete, .equipment-foot button, " +
+        ".room-actions button, .management-fee-actions button, " +
+        ".calendar-navigation button, #previous-tab"
+    )].filter((element) => {
+        const rect = element.getBoundingClientRect();
+        return rect.width && rect.height && rect.bottom > 0 &&
+            rect.top < window.innerHeight;
+    });
+    for (const [position, raised] of [
+        ["right", false], ["left", false], ["right", true], ["left", true],
+    ]) {
+        backToTopButton.dataset.position = position;
+        backToTopButton.toggleAttribute("data-raised", raised);
+        const rect = backToTopButton.getBoundingClientRect();
+        if (controls.every((control) =>
+            !overlapping(rect, control.getBoundingClientRect()))) return;
+    }
+    backToTopButton.hidden = true;
+}
+
+let topButtonUpdate = 0;
+function scheduleTopButtonUpdate() {
+    if (topButtonUpdate) return;
+    topButtonUpdate = requestAnimationFrame(() => {
+        topButtonUpdate = 0;
+        updateBackToTop();
+    });
+}
+window.addEventListener("scroll", scheduleTopButtonUpdate, { passive: true });
+window.addEventListener("resize", scheduleTopButtonUpdate);
+document.addEventListener("focusin", scheduleTopButtonUpdate);
+document.addEventListener("focusout", scheduleTopButtonUpdate);
+backToTopButton.addEventListener("click", () => {
+    document.querySelector("#planner-title").focus({ preventScroll: true });
+    window.scrollTo({
+        top: 0, behavior: reducedMotion.matches ? "instant" : "smooth",
+    });
+});
+
+function swipeExcluded(target) {
+    if (!(target instanceof Element) || target.closest(
+        "input, select, textarea, button, a, summary, " +
+        "[contenteditable], [draggable], [role=button], [role=tab], " +
+        "svg, .overview-pan, .calendar-scroll, .sheet-scroll, " +
+        ".survey-scroll, .platform-scroll, .reference-scroll, .tabs"
+    )) return true;
+    for (let element = target; element && element !== document.body;
+        element = element.parentElement) {
+        const overflow = window.getComputedStyle(element).overflowX;
+        if (["auto", "scroll"].includes(overflow) &&
+            element.scrollWidth > element.clientWidth + 1) return true;
+    }
+    return false;
+}
+
+let tabSwipe = null;
+document.addEventListener("touchstart", (event) => {
+    if (!mobileViewport.matches || !tabHistory.length ||
+        furnitureDrag || outdoorDrag || event.touches.length !== 1) {
+        tabSwipe = null;
+        return;
+    }
+    const touch = event.touches[0];
+    if (touch.clientX < 28 || touch.clientX > 72 ||
+        swipeExcluded(event.target)) {
+        tabSwipe = null;
+        return;
+    }
+    tabSwipe = {
+        id: touch.identifier, x: touch.clientX, y: touch.clientY,
+    };
+}, { passive: true });
+document.addEventListener("touchmove", (event) => {
+    if (!tabSwipe) return;
+    if (event.touches.length !== 1 ||
+        event.touches[0].identifier !== tabSwipe.id) {
+        tabSwipe = null;
+        return;
+    }
+    const dx = event.touches[0].clientX - tabSwipe.x;
+    const dy = event.touches[0].clientY - tabSwipe.y;
+    if (dx < -20 || Math.abs(dy) > 18 &&
+        Math.abs(dy) > Math.abs(dx) * .7) tabSwipe = null;
+}, { passive: true });
+document.addEventListener("touchend", (event) => {
+    if (!tabSwipe) return;
+    const start = tabSwipe;
+    tabSwipe = null;
+    if (event.touches.length || event.changedTouches.length !== 1 ||
+        event.changedTouches[0].identifier !== start.id ||
+        furnitureDrag || outdoorDrag) return;
+    const dx = event.changedTouches[0].clientX - start.x;
+    const dy = event.changedTouches[0].clientY - start.y;
+    if (dx >= 80 && Math.abs(dy) <= 50 &&
+        dx > Math.abs(dy) * 1.5) returnToVisitedTab();
+}, { passive: true });
+document.addEventListener("touchcancel", () => {
+    tabSwipe = null;
+}, { passive: true });
 
 window.addEventListener("keydown", (event) => {
     if (event.key !== "Escape" || view !== "plan" || !planRoomId ||

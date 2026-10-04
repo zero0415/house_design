@@ -50,6 +50,10 @@ class PublicSnapshotTests(unittest.TestCase):
                 self.assertIn(value, readme)
                 self.assertIn(value, quote)
         self.assertIn("182 個物件、28 款商品", readme)
+        for value in ("放大閱讀", "縮回全圖", "返回上一個分頁",
+                      "回到頁首", "不是瀏覽器上一頁", "待報價數目"):
+            with self.subTest(mobile=value):
+                self.assertIn(value, readme)
         for value in ("開工行事曆", "13 筆", "電梯走道保護",
                       "2027-01-30",
                       "2027-02-05 除夕、02-06 春節初一",

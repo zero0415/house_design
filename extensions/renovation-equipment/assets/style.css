@@ -2040,3 +2040,279 @@ p { margin: 6px 0 10px; }
     font-size: 13px; fill: #70501e; paint-order: stroke;
     stroke: #fff; stroke-width: 3px;
 }
+
+.mobile-secondary > summary, .mobile-tab-controls,
+.mobile-backup-cue, .mobile-overview-alert, .mobile-room-alert,
+.overview-reading-toggle, #budget-essentials,
+#management-fee-short, .mobile-budget-details,
+.mobile-title { display: none; }
+.plan-display-actions .plan-layer-settings { display: contents; }
+.overview-pan { min-width: 0; }
+#planner-title:focus-visible, .overview-pan:focus-visible {
+    outline: 3px solid #176d9d; outline-offset: 2px;
+}
+#back-to-top[hidden] { display: none; }
+
+@media (max-width: 600px) {
+    html {
+        scroll-padding-top: 104px;
+        scroll-padding-bottom: calc(88px + env(safe-area-inset-bottom));
+    }
+    .layout {
+        display: flex; flex-direction: column;
+        min-width: 0; padding: 12px 12px
+            calc(88px + env(safe-area-inset-bottom));
+    }
+    .layout > #content { order: 1; }
+    .layout > .mobile-budget-details { order: 2; }
+    .layout > .quote-intro { order: 3; }
+    .layout > .backup-details { order: 4; }
+    .masthead { gap: 4px; }
+    .masthead h1 { font-size: 23px; }
+    .mobile-secondary {
+        min-width: 0; margin: 6px 0; padding: 0;
+        border: 1px solid #c4d1d9; border-radius: 7px;
+    }
+    .mobile-secondary > summary {
+        display: list-item; min-height: 44px;
+        padding: 10px 12px; font-size: 14px; line-height: 1.5;
+        font-weight: 600; cursor: pointer; overflow-wrap: anywhere;
+    }
+    .mobile-secondary > :not(summary) { margin: 8px 12px; }
+    .budget {
+        min-width: 0; margin: 10px 0 6px; gap: 6px;
+    }
+    .budget > div {
+        min-width: 0; padding: 9px;
+        overflow-wrap: anywhere;
+    }
+    .budget .overall-total { grid-column: 1 / -1; order: -1; }
+    .budget strong, .budget .overall-total strong {
+        font-size: clamp(17px, 5vw, 21px);
+        overflow-wrap: anywhere;
+    }
+    .budget .quote-baseline strong { font-size: 16px; }
+    .budget span { font-size: 12px; }
+    .budget .desktop-title { display: none; }
+    .budget .mobile-title { display: block; }
+    .budget .budget-explanation {
+        display: none;
+    }
+    .mobile-budget-details {
+        display: block; margin: 4px 0;
+    }
+    .mobile-budget-details > :not(summary) {
+        display: block; font-size: 13px; line-height: 1.5;
+        overflow-wrap: anywhere;
+    }
+    #budget-essentials, #management-fee-short {
+        display: block; margin-top: 4px;
+        font-size: 12px; line-height: 1.4;
+        color: #384957; overflow-wrap: anywhere;
+    }
+    #management-fee-budget[hidden] { display: none; }
+    #management-fee-note[hidden] { display: none; }
+    .quote-intro .desktop-title { display: none; }
+    .quote-intro .mobile-title { display: inline; }
+    .mobile-tab-controls {
+        position: sticky; top: 0; z-index: 18;
+        display: flex; justify-content: space-between; align-items: center;
+        gap: 8px; min-height: 50px; margin-top: 10px;
+        background: var(--background-color-default, #fff);
+    }
+    .mobile-tab-controls button {
+        min-height: 44px; border: 1px solid #8ba9bc;
+        background: #f4f8fa; color: #21435a;
+        border-radius: 7px; padding: 8px 10px;
+        white-space: nowrap; font-size: 14px;
+    }
+    .mobile-tab-controls button:disabled { opacity: .65; }
+    .mobile-tab-controls span {
+        color: #45606f; font-size: 12px; text-align: right;
+    }
+    .tabs {
+        position: sticky; top: 50px; z-index: 17;
+        flex-wrap: nowrap; gap: 3px; margin: 0;
+        width: 100%; max-width: 100%;
+        overflow-x: auto; overflow-y: hidden;
+        overscroll-behavior-x: contain;
+        scrollbar-width: thin; scroll-padding-inline: 10px;
+        background: var(--background-color-default, #fff);
+    }
+    .tabs button {
+        flex: 0 0 auto; min-height: 44px;
+        padding: 9px 12px; white-space: nowrap;
+        font-size: 14px;
+    }
+    .toolbar { margin: 8px 0; gap: 6px; }
+    .toolbar button, .toolbar a {
+        min-height: 44px; padding: 9px 10px;
+        font-size: 14px;
+    }
+    .mobile-backup-cue {
+        display: block; margin: 6px 0;
+        font-size: 13px; font-weight: 600; color: #314858;
+    }
+    .toolbar {
+        display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+    .toolbar > button, .toolbar > a {
+        min-width: 0; white-space: normal; text-align: center;
+    }
+    .plan-overview { display: flex; flex-direction: column; }
+    .plan-overview > * { min-width: 0; }
+    .mobile-overview-alert, .mobile-room-alert {
+        display: block; margin: 6px 0;
+        padding: 8px; border: 1px solid #b82828;
+        border-radius: 7px; background: #fff4f2;
+        color: #9a1f1f; font-size: 13px;
+    }
+    .plan-detail { display: flex; flex-direction: column; }
+    .plan-detail > * { min-width: 0; }
+    .room-plan-scroll, .plan-detail > .platform-scroll {
+        width: 100%; max-width: 100%;
+        max-height: min(72svh, 740px);
+        overflow: auto; border: 1px solid #b5c7d1;
+        border-radius: 7px;
+        -webkit-overflow-scrolling: touch;
+        overscroll-behavior-x: contain;
+    }
+    .room-plan-scroll .room-svg,
+    .plan-detail > .platform-scroll .room-svg {
+        width: max(100%, 720px); max-width: none;
+        height: auto; margin: 0;
+    }
+    .room-plan-scroll:focus-visible,
+    .plan-detail > .platform-scroll:focus-visible {
+        outline: 3px solid #176d9d; outline-offset: 2px;
+    }
+    .plan-display-actions { justify-content: flex-start; gap: 5px; }
+    .plan-display-actions .plan-layer-settings {
+        display: block; flex: 1 1 100%;
+        margin: 2px 0; width: 100%;
+    }
+    .plan-layer-settings .plan-visibility-controls {
+        margin: 8px; gap: 6px;
+    }
+    .plan-layer-settings > [data-action="toggle-plan-source"] {
+        margin: 0 8px 8px;
+    }
+    .plan-display-actions button, .plan-detail button,
+    .outside-rooms button {
+        min-height: 44px; padding: 8px 10px;
+        font-size: 14px; white-space: normal;
+    }
+    .plan-detail .plan-room-navigation .back-to-overview,
+    .plan-room-navigation select { min-height: 44px; }
+    .plan-display-actions .overview-reading-toggle {
+        display: block; flex: 1 1 100%; order: -1;
+        border-color: #176d9d;
+        color: #125175; font-weight: 700;
+    }
+    .overview-pan {
+        width: 100%; max-width: 100%;
+        overflow-x: hidden; touch-action: pan-x pan-y;
+    }
+    .overview-pan.is-reading {
+        overflow: auto; max-height: min(72svh, 740px);
+        border: 2px solid #176d9d; border-radius: 7px;
+        overscroll-behavior-x: contain;
+        -webkit-overflow-scrolling: touch;
+    }
+    .overview-pan.is-reading .overview-svg {
+        display: block; width: 1000px; max-width: none;
+        height: auto; margin: 0;
+    }
+    .plan-detail, .room, .device-group, .product-database,
+    .survey-view, .electrical-sheet, .construction-calendar {
+        min-width: 0; max-width: 100%;
+        overflow-wrap: anywhere;
+    }
+    .room, .device-group, .product-database { padding: 10px; }
+    .item-summary small, .room-count, .product-description small,
+    .product-price, .item-amount, .door-legend, .plan-disclaimer,
+    .plan-footnote, .survey-note, .calendar-agenda li > span,
+    .quote-source-details, .quoted-baseline, .fields label,
+    .room-height-field, .room-size-controls label {
+        font-size: 14px; line-height: 1.5;
+    }
+    .plan-overlap-alert, .ac-planning-warning,
+    .urgent-cues, .warning-details > summary {
+        font-size: 14px; line-height: 1.45;
+    }
+    .room-nav a {
+        display: inline-flex; align-items: center; min-height: 44px;
+    }
+    .room-actions, .room-head { min-width: 0; max-width: 100%; }
+    .room-actions button, .equipment-foot button,
+    .product-database button, .furniture-options button,
+    .survey-toolbar button, .survey-toolbar select {
+        min-height: 44px; font-size: 14px;
+    }
+    .item-summary {
+        flex-wrap: wrap; justify-content: flex-start;
+        min-width: 0; gap: 7px;
+    }
+    .item-summary::before { flex: 0 0 7px; }
+    .item-summary > span:first-child { flex: 1 1 150px; }
+    .item-amount {
+        flex: 0 1 125px; min-width: 0;
+        white-space: normal; overflow-wrap: anywhere;
+    }
+    .item-summary .quoted-tag {
+        flex: 0 1 auto; max-width: 100%;
+        overflow-wrap: anywhere;
+    }
+    .item-summary .quick-delete {
+        flex: 0 0 auto; min-height: 44px;
+        font-size: 14px; white-space: normal;
+    }
+    .item-editor { min-width: 0; padding-left: 4px; }
+    .fields label.quantity, .fields label.unit,
+    .fields label.price, .fields label.currency-field,
+    .fields label.light-spec-number, .fields label.spotlight-count {
+        grid-column: span 3;
+    }
+    .layout input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"]),
+    .layout select, .layout textarea {
+        max-width: 100%; min-height: 44px; font-size: 16px;
+    }
+    .control-target { min-height: 44px; }
+    .control-target input { width: 22px; height: 22px; }
+    .product-card { min-width: 0; }
+    .product-card > button { min-width: 0; white-space: normal; }
+    .layout button:not(.calendar-event),
+    .layout details > summary { min-height: 44px; }
+    .calendar-event { min-height: 44px; }
+    .calendar-scroll, .sheet-scroll, .survey-scroll,
+    .reference-scroll, .platform-scroll, .room-plan-scroll {
+        max-width: 100%; overscroll-behavior-x: contain;
+        -webkit-overflow-scrolling: touch;
+    }
+    #back-to-top {
+        display: block; position: fixed; z-index: 19;
+        bottom: calc(12px + env(safe-area-inset-bottom));
+        right: max(12px, env(safe-area-inset-right));
+        min-width: 110px; min-height: 48px;
+        padding: 9px 12px; border-radius: 999px;
+        border: 2px solid #125175;
+        background: #0d5582; color: #fff;
+        box-shadow: 0 2px 9px #0004;
+        font-size: 15px; font-weight: 700;
+    }
+    #back-to-top[data-position="left"] {
+        right: auto; left: max(12px, env(safe-area-inset-left));
+    }
+    #back-to-top[data-raised] {
+        bottom: calc(70px + env(safe-area-inset-bottom));
+    }
+}
+
+@media (min-width: 601px) {
+    .mobile-secondary { border: 0; }
+    #back-to-top { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .tabs, .overview-pan { scroll-behavior: auto; }
+}
